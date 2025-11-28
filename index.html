@@ -266,8 +266,40 @@
             <div style="margin: 20px 0;">
                 <h4 style="margin-bottom: 10px;">拉取新模型</h4>
                 <input type="text" id="pullModelInput" placeholder="例如: qwen2.5:7b, gemma2:9b" style="width: 100%; margin-bottom: 10px;">
-                <button onclick="pullModel()" class="primary" style="width: 100%;">拉取模型</button>
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; flex: 1; padding: 8px; background: #374151; border-radius: 4px;">
+                        <input type="radio" name="pullMethod" value="api" checked onchange="updatePullMethod()">
+                        <span style="font-size: 13px;">HTTP API</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; flex: 1; padding: 8px; background: #374151; border-radius: 4px;">
+                        <input type="radio" name="pullMethod" value="cli" onchange="updatePullMethod()">
+                        <span style="font-size: 13px;">命令行</span>
+                    </label>
+                </div>
+                
+                <button onclick="pullModel()" class="primary" style="width: 100%;" id="pullBtn">拉取模型</button>
+                
+                <div id="pullCommandHint" style="display: none; margin-top: 10px; padding: 10px; background: #374151; border-radius: 4px; font-size: 12px;">
+                    <div style="margin-bottom: 5px; color: #e0e0e0;">请在终端执行以下命令：</div>
+                    <div style="background: #1f2937; padding: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: #10b981; word-break: break-all; font-size: 13px; font-weight: 500; min-height: 20px;" id="pullCommand">命令将显示在这里</div>
+                    <div style="margin-top: 5px; font-size: 11px; color: #9ca3af;">💡 命令行方式可以看到更详细的进度信息</div>
+                </div>
+                
                 <div id="pullStatus" style="margin-top: 10px;"></div>
+                <div id="pullProgress" style="display: none; margin-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px;">
+                        <span id="pullProgressText">准备中...</span>
+                        <span id="pullProgressPercent">0%</span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: #374151; border-radius: 4px; overflow: hidden;">
+                        <div id="pullProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #2563eb, #3b82f6); transition: width 0.3s;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 11px; color: #9ca3af;">
+                        <span id="pullSpeed">速度: --</span>
+                        <span id="pullSize">大小: --</span>
+                    </div>
+                </div>
             </div>
             
             <div style="margin: 20px 0;">

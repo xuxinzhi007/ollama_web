@@ -70,10 +70,28 @@ function isBaseModel(modelName) {
     return baseModels.some(base => lowerName.startsWith(base));
 }
 
+// 检查 Ollama 连接
+async function checkOllamaConnection() {
+    try {
+        const response = await fetch(`${API_BASE}/api/tags`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000) // 5秒超时
+        });
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+}
+
 // 加载所有模型
 async function loadModels() {
     try {
         const response = await fetch(`${API_BASE}/api/tags`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
         
         // 分类模型
@@ -99,7 +117,35 @@ async function loadModels() {
         
     } catch (error) {
         console.error('加载模型失败:', error);
-        showToast('无法连接到 Ollama，请确保服务正在运行', 'error', 5000);
+        
+        let errorMsg = '无法连接到 Ollama';
+        
+        if (error.message.includes('Failed to fetch')) {
+            errorMsg = `无法连接到 Ollama (${API_BASE})
+            
+请检查：
+1. Ollama 是否正在运行
+2. 访问 http://localhost:11434 查看状态
+3. 如果端口不是 11434，请修改代码`;
+        } else {
+            errorMsg = `连接失败: ${error.message}`;
+        }
+        
+        showToast(errorMsg, 'error', 8000);
+        
+        // 在侧边栏显示错误提示
+        const agentList = document.getElementById('agentList');
+        const noAgents = document.getElementById('noAgents');
+        agentList.innerHTML = '';
+        noAgents.style.display = 'block';
+        noAgents.innerHTML = `
+            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
+            <div style="color: #ef4444;">无法连接到 Ollama</div>
+            <div style="font-size: 11px; margin-top: 10px; color: #9ca3af;">
+                请确保 Ollama 正在运行<br>
+                端口: ${API_BASE}
+            </div>
+        `;
     }
 }
 
@@ -539,13 +585,93 @@ async function deleteBaseModel(modelName) {
     }
 }
 
+// 格式化文件大小
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+// 格式化速度
+function formatSpeed(bytesPerSecond) {
+    if (!bytesPerSecond || bytesPerSecond === 0) return '--';
+    return formatBytes(bytesPerSecond) + '/s';
+}
+
+// 更新拉取方式
+function updatePullMethod() {
+    const method = document.querySelector('input[name="pullMethod"]:checked').value;
+    const commandHint = document.getElementById('pullCommandHint');
+    const pullBtn = document.getElementById('pullBtn');
+    
+    if (method === 'cli') {
+        commandHint.style.display = 'block';
+        pullBtn.textContent = '显示命令';
+    } else {
+        commandHint.style.display = 'none';
+        pullBtn.textContent = '拉取模型';
+    }
+}
+
 // 拉取模型
 async function pullModel() {
     const modelName = document.getElementById('pullModelInput').value.trim();
-    if (!modelName) return;
+    if (!modelName) {
+        showToast('请输入模型名称', 'warning');
+        return;
+    }
     
+    const method = document.querySelector('input[name="pullMethod"]:checked').value;
+    
+    // 如果选择命令行方式
+    if (method === 'cli') {
+        const commandDiv = document.getElementById('pullCommand');
+        const commandHint = document.getElementById('pullCommandHint');
+        
+        if (!commandDiv) {
+            console.error('pullCommand 元素未找到');
+            showToast('界面错误，请刷新页面', 'error');
+            return;
+        }
+        
+        const command = `ollama pull ${modelName}`;
+        commandDiv.textContent = command;
+        commandDiv.innerHTML = command; // 同时设置 innerHTML 确保显示
+        commandHint.style.display = 'block';
+        
+        console.log('显示命令:', command);
+        
+        // 复制到剪贴板
+        navigator.clipboard.writeText(command).then(() => {
+            showToast('命令已复制到剪贴板', 'success');
+        }).catch((err) => {
+            console.error('复制失败:', err);
+            showToast('请手动复制命令', 'info');
+        });
+        
+        return;
+    }
+    
+    // HTTP API 方式
     const statusDiv = document.getElementById('pullStatus');
-    statusDiv.innerHTML = '<div class="status">正在拉取...</div>';
+    const progressDiv = document.getElementById('pullProgress');
+    const progressBar = document.getElementById('pullProgressBar');
+    const progressText = document.getElementById('pullProgressText');
+    const progressPercent = document.getElementById('pullProgressPercent');
+    const speedText = document.getElementById('pullSpeed');
+    const sizeText = document.getElementById('pullSize');
+    const pullBtn = document.getElementById('pullBtn');
+    
+    // 显示进度条
+    progressDiv.style.display = 'block';
+    statusDiv.innerHTML = '';
+    pullBtn.disabled = true;
+    pullBtn.textContent = '拉取中...';
+    
+    let lastTime = Date.now();
+    let lastCompleted = 0;
     
     try {
         const response = await fetch(`${API_BASE}/api/pull`, {
@@ -567,19 +693,86 @@ async function pullModel() {
             for (const line of lines) {
                 try {
                     const json = JSON.parse(line);
+                    
+                    // 显示状态信息
                     if (json.status) {
-                        statusDiv.innerHTML = `<div class="status">${json.status}</div>`;
+                        let statusText = json.status;
+                        
+                        // 翻译常见状态
+                        const statusMap = {
+                            'pulling manifest': '正在拉取清单',
+                            'pulling': '正在下载',
+                            'verifying sha256 digest': '正在验证文件',
+                            'writing manifest': '正在写入清单',
+                            'removing any unused layers': '正在清理',
+                            'success': '完成'
+                        };
+                        
+                        statusText = statusMap[json.status.toLowerCase()] || json.status;
+                        progressText.textContent = statusText;
                     }
-                } catch (e) {}
+                    
+                    // 计算进度
+                    if (json.completed !== undefined && json.total !== undefined && json.total > 0) {
+                        const percent = Math.round((json.completed / json.total) * 100);
+                        progressBar.style.width = percent + '%';
+                        progressPercent.textContent = percent + '%';
+                        
+                        // 计算速度
+                        const now = Date.now();
+                        const timeDiff = (now - lastTime) / 1000; // 秒
+                        const bytesDiff = json.completed - lastCompleted;
+                        
+                        if (timeDiff > 0.5) { // 每0.5秒更新一次速度
+                            const speed = bytesDiff / timeDiff;
+                            speedText.textContent = '速度: ' + formatSpeed(speed);
+                            lastTime = now;
+                            lastCompleted = json.completed;
+                        }
+                        
+                        // 显示大小
+                        sizeText.textContent = `${formatBytes(json.completed)} / ${formatBytes(json.total)}`;
+                    }
+                    
+                    // 如果没有进度信息，但有 digest 信息
+                    if (json.digest) {
+                        progressText.textContent = `正在处理: ${json.digest.substring(0, 12)}...`;
+                    }
+                    
+                } catch (e) {
+                    console.error('解析进度失败:', e, line);
+                }
             }
         }
         
-        statusDiv.innerHTML = '<div class="status success">拉取完成！</div>';
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressText.textContent = '拉取完成！';
         showToast(`模型 "${modelName}" 拉取成功！`, 'success');
-        loadModels();
+        
+        setTimeout(() => {
+            progressDiv.style.display = 'none';
+            loadModels();
+        }, 2000);
+        
     } catch (error) {
-        statusDiv.innerHTML = `<div class="status error">错误: ${error.message}</div>`;
-        showToast('拉取失败: ' + error.message, 'error');
+        progressDiv.style.display = 'none';
+        
+        let errorMsg = error.message;
+        if (error.message.includes('Failed to fetch')) {
+            errorMsg = '无法连接到 Ollama 服务，请确保 Ollama 正在运行';
+            statusDiv.innerHTML = `<div class="status error">
+                ${errorMsg}<br>
+                <small style="margin-top: 5px; display: block;">建议使用"命令行"方式拉取</small>
+            </div>`;
+        } else {
+            statusDiv.innerHTML = `<div class="status error">错误: ${errorMsg}</div>`;
+        }
+        
+        showToast('拉取失败: ' + errorMsg, 'error');
+    } finally {
+        pullBtn.disabled = false;
+        pullBtn.textContent = '拉取模型';
     }
 }
 
@@ -821,6 +1014,17 @@ function selectAgentMobile(agent) {
 }
 
 // 页面加载时初始化
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // 先检查连接
+    const isConnected = await checkOllamaConnection();
+    
+    if (!isConnected) {
+        showToast(`无法连接到 Ollama (${API_BASE})
+        
+请确保：
+1. Ollama 服务正在运行
+2. 端口是 11434`, 'error', 10000);
+    }
+    
     loadModels();
 });
