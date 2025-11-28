@@ -18,17 +18,44 @@ function showToast(message, type = 'info', duration = 3000) {
         'warning': '⚠'
     }[type] || 'ℹ';
     
-    toast.innerHTML = `<span style="font-size: 18px;">${icon}</span><span>${message}</span>`;
+    toast.innerHTML = `<span style="font-size: 18px;">${icon}</span><span style="flex: 1;">${message}</span><span class="toast-close">✕</span>`;
     
     container.appendChild(toast);
     
-    // 自动消失
-    setTimeout(() => {
+    // 点击关闭
+    toast.onclick = () => {
         toast.classList.add('hiding');
         setTimeout(() => {
-            container.removeChild(toast);
+            if (toast.parentNode) {
+                container.removeChild(toast);
+            }
+        }, 300);
+    };
+    
+    // 自动消失
+    const timer = setTimeout(() => {
+        toast.classList.add('hiding');
+        setTimeout(() => {
+            if (toast.parentNode) {
+                container.removeChild(toast);
+            }
         }, 300);
     }, duration);
+    
+    // 鼠标悬停时暂停自动关闭
+    toast.onmouseenter = () => clearTimeout(timer);
+    toast.onmouseleave = () => {
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.classList.add('hiding');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        container.removeChild(toast);
+                    }
+                }, 300);
+            }
+        }, 1000);
+    };
 }
 
 // 检查是否为底座模型
