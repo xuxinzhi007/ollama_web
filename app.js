@@ -99,14 +99,31 @@ async function loadModels() {
         baseModels = [];
         agents = [];
         
+        // 先收集所有底座模型
         data.models.forEach(model => {
             if (isBaseModel(model.name)) {
                 baseModels.push(model);
-            } else {
+            }
+        });
+        
+        // 然后处理智能体，尝试识别其底座模型
+        data.models.forEach(model => {
+            if (!isBaseModel(model.name)) {
+                // 尝试从模型详情中获取底座模型
+                let baseModel = 'unknown';
+                
+                // 如果模型名称包含底座模型名称，提取它
+                for (const base of baseModels) {
+                    if (model.name.includes(base.name.split(':')[0])) {
+                        baseModel = base.name;
+                        break;
+                    }
+                }
+                
                 agents.push({
                     name: model.name,
                     displayName: model.name,
-                    baseModel: 'unknown',
+                    baseModel: baseModel,
                     modelName: model.name
                 });
             }
@@ -247,16 +264,30 @@ function updateBaseModelSelect() {
 
 // 选择智能体
 function selectAgent(agent) {
-    // 切换智能体时询问是否清空对话
-    if (chatHistory.length > 0 && currentAgent && currentAgent.name !== agent.name) {
-        if (confirm('切换智能体，是否清空当前对话？')) {
-            clearChat();
-        }
+    // 保存当前对话
+    if (currentAgent && chatHistory.length > 0) {
+        saveChatHistory();
     }
     
+    // 切换智能体
     currentAgent = agent;
     document.getElementById('currentAgentName').textContent = agent.displayName;
     renderAgentList();
+    
+    // 保存当前选择的智能体
+    localStorage.setItem('lastAgent', JSON.stringify(agent));
+    
+    // 更新最近使用列表
+    updateRecentAgents(agent);
+    
+    // 加载新智能体的聊天记录
+    loadChatHistory();
+    
+    // 隐藏欢迎页面，显示聊天区域
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const chatArea = document.getElementById('chatArea');
+    if (welcomeScreen) welcomeScreen.style.display = 'none';
+    if (chatArea) chatArea.style.display = 'block';
 }
 
 // 显示智能体菜单
@@ -339,17 +370,84 @@ async function editAgent(agent) {
     document.getElementById('editorTitle').textContent = '编辑智能体';
     document.getElementById('agentName').value = agent.displayName;
     
-    // 加载现有配置
+    // 先尝试从 localStorage 加载保存的配置
+    const savedConfig = localStorage.getItem(`agent_config_${agent.modelName}`);
+    if (savedConfig) {
+        try {
+            const config = JSON.parse(savedConfig);
+            console.log('从 localStorage 加载配置:', config);
+            
+            document.getElementById('baseModelSelect').value = config.baseModel || '';
+            document.getElementById('systemPrompt').value = config.systemPrompt || '';
+            
+            if (config.parameters) {
+                const p = config.parameters;
+                if (p.temp) { document.getElementById('temperature').value = p.temp; updateParamValue('temp', p.temp); }
+                if (p.topp) { document.getElementById('top_p').value = p.topp; updateParamValue('topp', p.topp); }
+                if (p.topk) { document.getElementById('top_k').value = p.topk; updateParamValue('topk', p.topk); }
+                if (p.repeat) { document.getElementById('repeat_penalty').value = p.repeat; updateParamValue('repeat', p.repeat); }
+                if (p.numCtx) { document.getElementById('num_ctx').value = p.numCtx; updateParamValue('ctx', p.numCtx); }
+                if (p.numPredict) { document.getElementById('num_predict').value = p.numPredict; updateParamValue('predict', p.numPredict); }
+                if (p.seed) { document.getElementById('seed').value = p.seed; updateParamValue('seed', p.seed); }
+                if (p.stopSeq) { document.getElementById('stop_sequences').value = p.stopSeq; }
+            }
+            
+            // 已经加载完配置，打开编辑器
+            document.getElementById('agentEditor').style.display = 'block';
+            return;
+        } catch (e) {
+            console.error('解析保存的配置失败:', e);
+        }
+    }
+    
+    // 如果没有保存的配置，尝试从智能体对象获取底座模型
+    if (agent.baseModel && agent.baseModel !== 'unknown') {
+        document.getElementById('baseModelSelect').value = agent.baseModel;
+    }
+    
+    // 加载现有配置（从 Ollama API）
     try {
+        console.log('从 Ollama API 加载智能体配置:', agent.modelName);
+        
         const response = await fetch(`${API_BASE}/api/show`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: agent.modelName })
         });
-        const data = await response.json();
         
-        // 解析 Modelfile
-        const modelfile = data.modelfile || '';
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('获取到的数据:', data);
+        
+        // 优先使用 parent_model 字段
+        if (data.details && data.details.parent_model) {
+            document.getElementById('baseModelSelect').value = data.details.parent_model;
+            console.log('从 details.parent_model 获取底座:', data.details.parent_model);
+        }
+        
+        // 获取系统提示词
+        if (data.system) {
+            document.getElementById('systemPrompt').value = data.system;
+            console.log('从 system 字段获取提示词');
+        }
+        
+        // Ollama 返回的数据结构
+        let modelfile = '';
+        
+        // 尝试从不同字段获取 Modelfile
+        if (data.modelfile) {
+            modelfile = data.modelfile;
+        } else if (data.details && data.details.modelfile) {
+            modelfile = data.details.modelfile;
+        }
+        
+        console.log('Modelfile 内容:\n', modelfile);
+        console.log('Parameters:', data.parameters);
+        console.log('System:', data.system);
+        
         const fromMatch = modelfile.match(/FROM\s+(\S+)/);
         const systemMatch = modelfile.match(/SYSTEM\s+"""([\s\S]*?)"""/);
         const tempMatch = modelfile.match(/PARAMETER\s+temperature\s+([\d.]+)/);
@@ -361,8 +459,50 @@ async function editAgent(agent) {
         const seedMatch = modelfile.match(/PARAMETER\s+seed\s+([\d]+)/);
         const stopMatches = modelfile.match(/PARAMETER\s+stop\s+"([^"]+)"/g);
         
-        if (fromMatch) document.getElementById('baseModelSelect').value = fromMatch[1];
-        if (systemMatch) document.getElementById('systemPrompt').value = systemMatch[1].trim();
+        console.log('解析结果:', {
+            from: fromMatch?.[1],
+            system: systemMatch?.[1],
+            temp: tempMatch?.[1],
+            topp: toppMatch?.[1]
+        });
+        
+        // 从 Modelfile 解析其他参数（底座和系统提示词已经在上面设置了）
+        if (systemMatch && !data.system) {
+            document.getElementById('systemPrompt').value = systemMatch[1].trim();
+        }
+        
+        // 尝试从 parameters 对象获取参数
+        if (data.parameters) {
+            const params = data.parameters;
+            if (params.temperature !== undefined) {
+                document.getElementById('temperature').value = params.temperature;
+                updateParamValue('temp', params.temperature);
+            }
+            if (params.top_p !== undefined) {
+                document.getElementById('top_p').value = params.top_p;
+                updateParamValue('topp', params.top_p);
+            }
+            if (params.top_k !== undefined) {
+                document.getElementById('top_k').value = params.top_k;
+                updateParamValue('topk', params.top_k);
+            }
+            if (params.repeat_penalty !== undefined) {
+                document.getElementById('repeat_penalty').value = params.repeat_penalty;
+                updateParamValue('repeat', params.repeat_penalty);
+            }
+            if (params.num_ctx !== undefined) {
+                document.getElementById('num_ctx').value = params.num_ctx;
+                updateParamValue('ctx', params.num_ctx);
+            }
+            if (params.num_predict !== undefined) {
+                document.getElementById('num_predict').value = params.num_predict;
+                updateParamValue('predict', params.num_predict);
+            }
+            if (params.seed !== undefined) {
+                document.getElementById('seed').value = params.seed;
+                updateParamValue('seed', params.seed);
+            }
+        }
         if (tempMatch) {
             document.getElementById('temperature').value = tempMatch[1];
             updateParamValue('temp', tempMatch[1]);
@@ -398,6 +538,7 @@ async function editAgent(agent) {
         
     } catch (error) {
         console.error('加载智能体配置失败:', error);
+        showToast('加载配置失败: ' + error.message, 'error');
     }
     
     document.getElementById('agentEditor').style.display = 'block';
@@ -561,6 +702,17 @@ async function saveAgent() {
         
         statusDiv.innerHTML = '<div class="status success">保存成功！</div>';
         console.log('智能体创建成功:', modelName);
+        
+        // 保存智能体配置到 localStorage
+        const agentConfig = {
+            modelName,
+            displayName,
+            baseModel,
+            systemPrompt,
+            parameters: { temp, topp, topk, repeat, numCtx, numPredict, seed, stopSeq }
+        };
+        localStorage.setItem(`agent_config_${modelName}`, JSON.stringify(agentConfig));
+        
         showToast(`智能体 "${displayName}" ${editingAgent ? '更新' : '创建'}成功！模型名: ${modelName}`, 'success', 5000);
         
         setTimeout(() => {
@@ -1023,6 +1175,9 @@ async function sendMessage() {
         
         chatHistory.push({ role: 'assistant', content: fullResponse });
         
+        // 保存聊天记录
+        saveChatHistory();
+        
     } catch (error) {
         assistantDiv.textContent = '错误: ' + error.message;
     }
@@ -1044,10 +1199,48 @@ function addMessage(role, content) {
     return messageDiv;
 }
 
+// 保存聊天记录到 localStorage
+function saveChatHistory() {
+    if (currentAgent) {
+        const key = `chat_${currentAgent.modelName}`;
+        localStorage.setItem(key, JSON.stringify(chatHistory));
+    }
+}
+
+// 加载聊天记录
+function loadChatHistory() {
+    if (currentAgent) {
+        const key = `chat_${currentAgent.modelName}`;
+        const saved = localStorage.getItem(key);
+        if (saved) {
+            try {
+                chatHistory = JSON.parse(saved);
+                // 重新渲染聊天记录
+                const chatArea = document.getElementById('chatArea');
+                chatArea.innerHTML = '';
+                chatHistory.forEach(msg => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `message ${msg.role}`;
+                    messageDiv.textContent = msg.content;
+                    chatArea.appendChild(messageDiv);
+                });
+                chatArea.scrollTop = chatArea.scrollHeight;
+            } catch (e) {
+                console.error('加载聊天记录失败:', e);
+            }
+        }
+    }
+}
+
 // 清空对话
 function clearChat() {
     chatHistory = [];
     document.getElementById('chatArea').innerHTML = '';
+    // 同时清除 localStorage
+    if (currentAgent) {
+        const key = `chat_${currentAgent.modelName}`;
+        localStorage.removeItem(key);
+    }
 }
 
 // 显示存储位置信息
@@ -1197,6 +1390,15 @@ window.downloadModelfile = function() {
     showToast('Modelfile 已下载，请按提示手动创建', 'success', 5000);
 }
 
+// 处理输入框按键
+function handleInputKeydown(event) {
+    // Enter 发送，Shift+Enter 换行
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+    }
+}
+
 // 移动端侧边栏切换
 function toggleMobileSidebar() {
     const sidebar = document.querySelector('.sidebar');
@@ -1213,6 +1415,85 @@ function selectAgentMobile(agent) {
     // 如果是移动端，关闭侧边栏
     if (window.innerWidth <= 768) {
         toggleMobileSidebar();
+    }
+}
+
+// 更新最近使用的智能体
+function updateRecentAgents(agent) {
+    let recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
+    
+    // 移除重复的
+    recent = recent.filter(a => a.modelName !== agent.modelName);
+    
+    // 添加到开头
+    recent.unshift({
+        modelName: agent.modelName,
+        displayName: agent.displayName,
+        lastUsed: Date.now()
+    });
+    
+    // 只保留最近 5 个
+    recent = recent.slice(0, 5);
+    
+    localStorage.setItem('recentAgents', JSON.stringify(recent));
+    renderRecentAgents();
+}
+
+// 渲染最近使用的智能体
+function renderRecentAgents() {
+    const container = document.getElementById('recentAgents');
+    if (!container) return;
+    
+    const recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
+    
+    if (recent.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    container.innerHTML = `
+        <h3 style="margin-bottom: 15px; font-size: 16px; color: #e0e0e0;">最近使用</h3>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+            ${recent.map(agent => `
+                <button onclick="selectAgentByName('${agent.modelName}')" style="padding: 12px 20px; background: #374151; border: none; border-radius: 6px; color: white; cursor: pointer; transition: all 0.2s;">
+                    <div style="font-weight: 500;">${agent.displayName}</div>
+                    <div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">${new Date(agent.lastUsed).toLocaleDateString()}</div>
+                </button>
+            `).join('')}
+        </div>
+    `;
+}
+
+// 通过名称选择智能体
+window.selectAgentByName = function(modelName) {
+    const agent = agents.find(a => a.modelName === modelName);
+    if (agent) {
+        selectAgent(agent);
+    } else {
+        showToast('智能体不存在，可能已被删除', 'warning');
+    }
+}
+
+// 恢复上次选择的智能体
+function restoreLastAgent() {
+    const lastAgent = localStorage.getItem('lastAgent');
+    if (lastAgent) {
+        try {
+            const agent = JSON.parse(lastAgent);
+            // 检查智能体是否还存在
+            const exists = agents.find(a => a.modelName === agent.modelName);
+            if (exists) {
+                selectAgent(exists);
+            } else {
+                // 智能体已被删除，显示欢迎页面
+                renderRecentAgents();
+            }
+        } catch (e) {
+            console.error('恢复智能体失败:', e);
+        }
+    } else {
+        // 没有上次选择的智能体，显示欢迎页面
+        renderRecentAgents();
     }
 }
 
@@ -1251,7 +1532,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         return; // 不再继续加载，避免后续的 loadModels 再次报错
     }
     
-    loadModels();
+    await loadModels();
+    
+    // 恢复上次选择的智能体
+    restoreLastAgent();
 });
 
 // 防止在拉取模型时刷新页面
