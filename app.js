@@ -247,12 +247,6 @@ function showAgentMenu(agent, button) {
 
 // 创建新智能体
 function createNewAgent() {
-    if (baseModels.length === 0) {
-        showToast('请先拉取底座模型', 'warning');
-        toggleManagePanel();
-        return;
-    }
-    
     editingAgent = null;
     document.getElementById('editorTitle').textContent = '创建智能体';
     document.getElementById('agentName').value = '';
@@ -520,9 +514,12 @@ function updateParamValue(type, value) {
         'topk': 'topkValue',
         'repeat': 'repeatValue'
     };
-    const element = document.getElementById(displays[type]);
+    const elementId = displays[type];
+    const element = document.getElementById(elementId);
     if (element) {
         element.textContent = value;
+    } else {
+        console.warn(`Element ${elementId} not found for type ${type}`);
     }
 }
 

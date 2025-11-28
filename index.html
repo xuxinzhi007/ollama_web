@@ -192,56 +192,9 @@
                 <select id="baseModelSelect" style="width: 100%;">
                     <option value="">选择底座模型...</option>
                 </select>
-                <small style="color: #9ca3af;">如果没有底座模型，请先在"管理底座模型"中拉取</small>
+                <small style="color: #9ca3af;">如果没有底座模型，请先在侧边栏"管理底座模型"中拉取</small>
             </div>
-                
-                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                    <button onclick="toggleParamPanel()" style="flex: 1;">⚙️ 参数配置</button>
-                    <button onclick="insertTemplate()" style="flex: 1;">📝 插入模板</button>
-                </div>
-                
-                <div id="paramPanel" style="display: none; background: #1f2937; padding: 15px; border-radius: 6px; margin-bottom: 10px;">
-                    <h4 style="margin-bottom: 10px; color: #fff;">参数调节</h4>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>🌡️ Temperature (创造性)</span>
-                            <span id="tempValue">0.8</span>
-                        </label>
-                        <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.8" style="width: 100%;" oninput="updateParamValue('temp', this.value)">
-                        <small style="color: #9ca3af;">低=保守准确，高=创意随机 (角色扮演推荐: 0.8-1.2)</small>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>🎯 Top P (多样性)</span>
-                            <span id="toppValue">0.9</span>
-                        </label>
-                        <input type="range" id="top_p" min="0" max="1" step="0.05" value="0.9" style="width: 100%;" oninput="updateParamValue('topp', this.value)">
-                        <small style="color: #9ca3af;">控制词汇选择范围 (推荐: 0.9-0.95)</small>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>🔢 Top K (候选词数)</span>
-                            <span id="topkValue">40</span>
-                        </label>
-                        <input type="range" id="top_k" min="1" max="100" step="1" value="40" style="width: 100%;" oninput="updateParamValue('topk', this.value)">
-                        <small style="color: #9ca3af;">每次选择考虑的词数 (推荐: 40-60)</small>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>🔁 Repeat Penalty (防重复)</span>
-                            <span id="repeatValue">1.1</span>
-                        </label>
-                        <input type="range" id="repeat_penalty" min="1" max="2" step="0.05" value="1.1" style="width: 100%;" oninput="updateParamValue('repeat', this.value)">
-                        <small style="color: #9ca3af;">惩罚重复内容 (推荐: 1.1-1.2)</small>
-                    </div>
-                    
-                    <button onclick="applyParams()" class="primary" style="width: 100%;">应用参数到 Modelfile</button>
-                </div>
-                
+
             <div style="margin-bottom: 15px;">
                 <label style="display: block; margin-bottom: 10px; font-weight: 500;">参数配置</label>
                 <div style="background: #1f2937; padding: 15px; border-radius: 6px;">
