@@ -283,10 +283,17 @@ function createNewAgent() {
     document.getElementById('top_p').value = '0.9';
     document.getElementById('top_k').value = '40';
     document.getElementById('repeat_penalty').value = '1.1';
+    document.getElementById('num_ctx').value = '2048';
+    document.getElementById('num_predict').value = '-1';
+    document.getElementById('seed').value = '0';
+    document.getElementById('stop_sequences').value = '';
     updateParamValue('temp', '0.8');
     updateParamValue('topp', '0.9');
     updateParamValue('topk', '40');
     updateParamValue('repeat', '1.1');
+    updateParamValue('ctx', '2048');
+    updateParamValue('predict', '-1');
+    updateParamValue('seed', '0');
     document.getElementById('agentEditor').style.display = 'block';
 }
 
@@ -313,6 +320,10 @@ async function editAgent(agent) {
         const toppMatch = modelfile.match(/PARAMETER\s+top_p\s+([\d.]+)/);
         const topkMatch = modelfile.match(/PARAMETER\s+top_k\s+([\d]+)/);
         const repeatMatch = modelfile.match(/PARAMETER\s+repeat_penalty\s+([\d.]+)/);
+        const ctxMatch = modelfile.match(/PARAMETER\s+num_ctx\s+([\d]+)/);
+        const predictMatch = modelfile.match(/PARAMETER\s+num_predict\s+([-\d]+)/);
+        const seedMatch = modelfile.match(/PARAMETER\s+seed\s+([\d]+)/);
+        const stopMatches = modelfile.match(/PARAMETER\s+stop\s+"([^"]+)"/g);
         
         if (fromMatch) document.getElementById('baseModelSelect').value = fromMatch[1];
         if (systemMatch) document.getElementById('systemPrompt').value = systemMatch[1].trim();
@@ -332,6 +343,22 @@ async function editAgent(agent) {
             document.getElementById('repeat_penalty').value = repeatMatch[1];
             updateParamValue('repeat', repeatMatch[1]);
         }
+        if (ctxMatch) {
+            document.getElementById('num_ctx').value = ctxMatch[1];
+            updateParamValue('ctx', ctxMatch[1]);
+        }
+        if (predictMatch) {
+            document.getElementById('num_predict').value = predictMatch[1];
+            updateParamValue('predict', predictMatch[1]);
+        }
+        if (seedMatch) {
+            document.getElementById('seed').value = seedMatch[1];
+            updateParamValue('seed', seedMatch[1]);
+        }
+        if (stopMatches) {
+            const stops = stopMatches.map(m => m.match(/"([^"]+)"/)[1]);
+            document.getElementById('stop_sequences').value = stops.join(', ');
+        }
         
     } catch (error) {
         console.error('加载智能体配置失败:', error);
@@ -349,6 +376,10 @@ async function saveAgent() {
     const topp = document.getElementById('top_p').value;
     const topk = document.getElementById('top_k').value;
     const repeat = document.getElementById('repeat_penalty').value;
+    const numCtx = document.getElementById('num_ctx').value;
+    const numPredict = document.getElementById('num_predict').value;
+    const seed = document.getElementById('seed').value;
+    const stopSeq = document.getElementById('stop_sequences').value.trim();
     
     if (!displayName || !baseModel) {
         showToast('请填写智能体名称并选择底座模型', 'warning');
@@ -359,12 +390,31 @@ async function saveAgent() {
     const modelName = editingAgent ? editingAgent.modelName : displayName.toLowerCase().replace(/\s+/g, '-');
     
     // 生成 Modelfile
-    const modelfile = `FROM ${baseModel}
+    let modelfile = `FROM ${baseModel}
 
 PARAMETER temperature ${temp}
 PARAMETER top_p ${topp}
 PARAMETER top_k ${topk}
-PARAMETER repeat_penalty ${repeat}
+PARAMETER repeat_penalty ${repeat}`;
+
+    // 添加高级参数（如果不是默认值）
+    if (numCtx !== '2048') {
+        modelfile += `\nPARAMETER num_ctx ${numCtx}`;
+    }
+    if (numPredict !== '-1') {
+        modelfile += `\nPARAMETER num_predict ${numPredict}`;
+    }
+    if (seed !== '0') {
+        modelfile += `\nPARAMETER seed ${seed}`;
+    }
+    if (stopSeq) {
+        const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
+        stops.forEach(stop => {
+            modelfile += `\nPARAMETER stop "${stop}"`;
+        });
+    }
+
+    modelfile += `
 
 SYSTEM """
 ${systemPrompt || '你是一个友好的AI助手。'}
@@ -539,12 +589,20 @@ function updateParamValue(type, value) {
         'temp': 'tempValue',
         'topp': 'toppValue',
         'topk': 'topkValue',
-        'repeat': 'repeatValue'
+        'repeat': 'repeatValue',
+        'ctx': 'ctxValue',
+        'predict': 'predictValue',
+        'seed': 'seedValue'
     };
     const elementId = displays[type];
     const element = document.getElementById(elementId);
     if (element) {
-        element.textContent = value;
+        // 特殊处理 predict 的显示
+        if (type === 'predict' && value === '-1') {
+            element.textContent = '无限制';
+        } else {
+            element.textContent = value;
+        }
     } else {
         console.warn(`Element ${elementId} not found for type ${type}`);
     }
