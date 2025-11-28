@@ -165,6 +165,21 @@
         .status.success { background: #10b981; color: white; }
         .status.error { background: #ef4444; color: white; }
         
+        /* 代码块滚动条样式 */
+        div::-webkit-scrollbar {
+            height: 6px;
+        }
+        div::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+        div::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 3px;
+        }
+        div::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+        
         /* Toast 通知 */
         .toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
         .toast { 
@@ -303,8 +318,79 @@
             </div>
             
             <div style="margin: 20px 0;">
-                <h4 style="margin-bottom: 10px;">已安装的底座模型</h4>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h4 style="margin: 0;">已安装的底座模型</h4>
+                    <button onclick="showStorageInfo()" style="padding: 4px 10px; font-size: 11px; background: #374151;">📁 存储位置</button>
+                </div>
                 <div id="baseModelList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 存储位置信息 -->
+    <div id="storageInfoModal" class="modal-overlay" style="display: none;" onclick="closeStorageInfo()">
+        <div class="modal-content" style="max-width: 700px;" onclick="event.stopPropagation()">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">📁 模型存储位置</h3>
+                <button onclick="closeStorageInfo()" class="close-btn">✕</button>
+            </div>
+            
+            <div style="margin-bottom: 20px; padding: 15px; background: #1f2937; border-radius: 6px;">
+                <div style="font-size: 13px; color: #9ca3af; margin-bottom: 8px;">默认存储路径：</div>
+                <div id="defaultStoragePath" style="font-family: monospace; color: #10b981; font-size: 13px; word-break: break-all;"></div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <h4 style="margin-bottom: 10px; font-size: 14px;">💡 如何修改存储位置</h4>
+                <div style="background: #374151; padding: 15px; border-radius: 6px; font-size: 13px; line-height: 1.6;">
+                    <div style="margin-bottom: 15px;">
+                        <strong style="color: #10b981;">Windows:</strong>
+                        <ol style="margin: 8px 0 0 20px; color: #e0e0e0;">
+                            <li>右键"此电脑" → 属性 → 高级系统设置</li>
+                            <li>点击"环境变量"</li>
+                            <li>在"系统变量"中点击"新建"</li>
+                            <li>变量名: <code style="background: #1f2937; padding: 2px 6px; border-radius: 3px;">OLLAMA_MODELS</code></li>
+                            <li>变量值: <code style="background: #1f2937; padding: 2px 6px; border-radius: 3px;">D:\ollama\models</code> (你的目标路径)</li>
+                            <li>重启 Ollama 服务</li>
+                        </ol>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <strong style="color: #10b981;">macOS/Linux:</strong>
+                        <div style="margin-top: 8px; background: #1f2937; padding: 10px; border-radius: 4px; font-family: monospace; color: #10b981; font-size: 12px;">
+                            export OLLAMA_MODELS="/path/to/models"
+                        </div>
+                        <div style="margin-top: 5px; color: #9ca3af; font-size: 11px;">
+                            添加到 ~/.bashrc 或 ~/.zshrc 使其永久生效
+                        </div>
+                    </div>
+                    
+                    <div style="padding: 10px; background: #1f2937; border-radius: 4px; border-left: 3px solid #f59e0b;">
+                        <div style="color: #f59e0b; font-size: 12px; margin-bottom: 5px;">⚠️ 注意</div>
+                        <div style="color: #9ca3af; font-size: 11px;">
+                            • 修改后需要重启 Ollama 服务才能生效<br>
+                            • 已下载的模型需要手动移动到新位置<br>
+                            • 确保新路径有足够的磁盘空间
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <h4 style="margin-bottom: 10px; font-size: 14px;">🔧 快速设置命令</h4>
+                <div style="background: #374151; padding: 10px; border-radius: 6px;">
+                    <div style="font-size: 12px; color: #9ca3af; margin-bottom: 5px;">Windows (PowerShell 管理员):</div>
+                    <div style="background: #1f2937; padding: 8px; border-radius: 4px; margin-bottom: 10px; position: relative;">
+                        <div style="font-family: 'Courier New', monospace; color: #10b981; font-size: 11px; overflow-x: auto; white-space: nowrap; padding-right: 60px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937;" id="winCommand">[System.Environment]::SetEnvironmentVariable('OLLAMA_MODELS', 'D:\ollama\models', 'Machine')</div>
+                        <button onclick="copyCommand('winCommand')" style="position: absolute; right: 8px; top: 8px; padding: 4px 8px; background: #2563eb; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">复制</button>
+                    </div>
+                    
+                    <div style="font-size: 12px; color: #9ca3af; margin-bottom: 5px;">macOS/Linux:</div>
+                    <div style="background: #1f2937; padding: 8px; border-radius: 4px; position: relative;">
+                        <div style="font-family: 'Courier New', monospace; color: #10b981; font-size: 11px; overflow-x: auto; white-space: nowrap; padding-right: 60px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937;" id="unixCommand">echo 'export OLLAMA_MODELS="/path/to/models"' >> ~/.zshrc</div>
+                        <button onclick="copyCommand('unixCommand')" style="position: absolute; right: 8px; top: 8px; padding: 4px 8px; background: #2563eb; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">复制</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

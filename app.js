@@ -4,6 +4,7 @@ let currentAgent = null; // 当前选中的智能体
 let agents = []; // 所有智能体列表
 let baseModels = []; // 底座模型列表
 let editingAgent = null; // 正在编辑的智能体
+let isPulling = false; // 是否正在拉取模型
 
 // Toast 通知系统
 function showToast(message, type = 'info', duration = 3000) {
@@ -118,33 +119,22 @@ async function loadModels() {
     } catch (error) {
         console.error('加载模型失败:', error);
         
-        let errorMsg = '无法连接到 Ollama';
-        
-        if (error.message.includes('Failed to fetch')) {
-            errorMsg = `无法连接到 Ollama (${API_BASE})
-            
-请检查：
-1. Ollama 是否正在运行
-2. 访问 http://localhost:11434 查看状态
-3. 如果端口不是 11434，请修改代码`;
-        } else {
-            errorMsg = `连接失败: ${error.message}`;
-        }
-        
-        showToast(errorMsg, 'error', 8000);
-        
-        // 在侧边栏显示错误提示
+        // 在侧边栏显示错误提示（不显示 Toast，避免重复）
         const agentList = document.getElementById('agentList');
         const noAgents = document.getElementById('noAgents');
         agentList.innerHTML = '';
         noAgents.style.display = 'block';
         noAgents.innerHTML = `
             <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
-            <div style="color: #ef4444;">无法连接到 Ollama</div>
-            <div style="font-size: 11px; margin-top: 10px; color: #9ca3af;">
-                请确保 Ollama 正在运行<br>
+            <div style="color: #ef4444; font-weight: 500;">连接失败</div>
+            <div style="font-size: 12px; margin-top: 10px; color: #9ca3af; line-height: 1.5;">
+                ${error.message}<br>
+                <br>
                 端口: ${API_BASE}
             </div>
+            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #2563eb; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">
+                重新连接
+            </button>
         `;
     }
 }
@@ -558,7 +548,9 @@ function closeAgentEditor() {
 // 管理面板
 function toggleManagePanel() {
     document.getElementById('managePanel').style.display = 'block';
-    loadModels();
+    // 不需要重新加载，因为已经在页面加载时加载过了
+    // 只在需要时更新底座模型列表
+    renderBaseModelList();
 }
 
 function closeManagePanel() {
@@ -669,6 +661,7 @@ async function pullModel() {
     statusDiv.innerHTML = '';
     pullBtn.disabled = true;
     pullBtn.textContent = '拉取中...';
+    isPulling = true; // 标记正在拉取
     
     let lastTime = Date.now();
     let lastCompleted = 0;
@@ -748,6 +741,7 @@ async function pullModel() {
         progressBar.style.width = '100%';
         progressPercent.textContent = '100%';
         progressText.textContent = '拉取完成！';
+        isPulling = false; // 标记拉取结束
         showToast(`模型 "${modelName}" 拉取成功！`, 'success');
         
         setTimeout(() => {
@@ -773,6 +767,7 @@ async function pullModel() {
     } finally {
         pullBtn.disabled = false;
         pullBtn.textContent = '拉取模型';
+        isPulling = false; // 标记拉取结束
     }
 }
 
@@ -994,6 +989,69 @@ function clearChat() {
     document.getElementById('chatArea').innerHTML = '';
 }
 
+// 显示存储位置信息
+window.showStorageInfo = function() {
+    const modal = document.getElementById('storageInfoModal');
+    const pathDiv = document.getElementById('defaultStoragePath');
+    
+    if (!modal || !pathDiv) {
+        console.error('存储信息模态框元素未找到');
+        showToast('界面错误，请刷新页面', 'error');
+        return;
+    }
+    
+    // 根据操作系统显示默认路径
+    const platform = navigator.platform.toLowerCase();
+    const userAgent = navigator.userAgent.toLowerCase();
+    let defaultPath = '';
+    let osName = '';
+    
+    // 检测操作系统
+    if (platform.includes('win') || userAgent.includes('windows')) {
+        defaultPath = 'C:\\Users\\<用户名>\\.ollama\\models';
+        osName = 'Windows';
+    } else if (platform.includes('mac') || userAgent.includes('mac')) {
+        defaultPath = '~/.ollama/models';
+        osName = 'macOS';
+    } else if (platform.includes('linux') || userAgent.includes('linux')) {
+        defaultPath = '~/.ollama/models';
+        osName = 'Linux';
+    } else {
+        defaultPath = '~/.ollama/models';
+        osName = '未知系统';
+    }
+    
+    pathDiv.innerHTML = `
+        <div style="margin-bottom: 5px; color: #9ca3af; font-size: 11px;">检测到系统: ${osName}</div>
+        <div>${defaultPath}</div>
+    `;
+    modal.style.display = 'flex';
+}
+
+window.closeStorageInfo = function() {
+    const modal = document.getElementById('storageInfoModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// 复制命令
+window.copyCommand = function(elementId) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        showToast('元素未找到', 'error');
+        return;
+    }
+    
+    const text = element.textContent.trim();
+    
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('命令已复制到剪贴板', 'success');
+    }).catch(() => {
+        showToast('复制失败，请手动复制', 'error');
+    });
+}
+
 // 移动端侧边栏切换
 function toggleMobileSidebar() {
     const sidebar = document.querySelector('.sidebar');
@@ -1019,12 +1077,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isConnected = await checkOllamaConnection();
     
     if (!isConnected) {
+        // 显示 Toast 提示
         showToast(`无法连接到 Ollama (${API_BASE})
+
+请确保 Ollama 服务正在运行`, 'error', 8000);
         
-请确保：
-1. Ollama 服务正在运行
-2. 端口是 11434`, 'error', 10000);
+        // 显示连接失败的界面提示
+        const agentList = document.getElementById('agentList');
+        const noAgents = document.getElementById('noAgents');
+        agentList.innerHTML = '';
+        noAgents.style.display = 'block';
+        noAgents.innerHTML = `
+            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
+            <div style="color: #ef4444; font-weight: 500;">无法连接到 Ollama</div>
+            <div style="font-size: 12px; margin-top: 10px; color: #9ca3af; line-height: 1.5;">
+                请确保 Ollama 正在运行<br>
+                <br>
+                <strong>启动方法：</strong><br>
+                • macOS/Linux: 从应用启动<br>
+                • Windows: 从开始菜单启动<br>
+                <br>
+                端口: ${API_BASE}
+            </div>
+            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #2563eb; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">
+                重新连接
+            </button>
+        `;
+        return; // 不再继续加载，避免后续的 loadModels 再次报错
     }
     
     loadModels();
+});
+
+// 防止在拉取模型时刷新页面
+window.addEventListener('beforeunload', (e) => {
+    if (isPulling) {
+        e.preventDefault();
+        e.returnValue = '正在拉取模型，刷新页面会中断下载。确定要离开吗？';
+        return e.returnValue;
+    }
 });
