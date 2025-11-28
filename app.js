@@ -118,33 +118,22 @@ async function loadModels() {
     } catch (error) {
         console.error('加载模型失败:', error);
         
-        let errorMsg = '无法连接到 Ollama';
-        
-        if (error.message.includes('Failed to fetch')) {
-            errorMsg = `无法连接到 Ollama (${API_BASE})
-            
-请检查：
-1. Ollama 是否正在运行
-2. 访问 http://localhost:11434 查看状态
-3. 如果端口不是 11434，请修改代码`;
-        } else {
-            errorMsg = `连接失败: ${error.message}`;
-        }
-        
-        showToast(errorMsg, 'error', 8000);
-        
-        // 在侧边栏显示错误提示
+        // 在侧边栏显示错误提示（不显示 Toast，避免重复）
         const agentList = document.getElementById('agentList');
         const noAgents = document.getElementById('noAgents');
         agentList.innerHTML = '';
         noAgents.style.display = 'block';
         noAgents.innerHTML = `
             <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
-            <div style="color: #ef4444;">无法连接到 Ollama</div>
-            <div style="font-size: 11px; margin-top: 10px; color: #9ca3af;">
-                请确保 Ollama 正在运行<br>
+            <div style="color: #ef4444; font-weight: 500;">连接失败</div>
+            <div style="font-size: 12px; margin-top: 10px; color: #9ca3af; line-height: 1.5;">
+                ${error.message}<br>
+                <br>
                 端口: ${API_BASE}
             </div>
+            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #2563eb; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">
+                重新连接
+            </button>
         `;
     }
 }
@@ -558,7 +547,9 @@ function closeAgentEditor() {
 // 管理面板
 function toggleManagePanel() {
     document.getElementById('managePanel').style.display = 'block';
-    loadModels();
+    // 不需要重新加载，因为已经在页面加载时加载过了
+    // 只在需要时更新底座模型列表
+    renderBaseModelList();
 }
 
 function closeManagePanel() {
@@ -1019,11 +1010,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isConnected = await checkOllamaConnection();
     
     if (!isConnected) {
+        // 显示 Toast 提示
         showToast(`无法连接到 Ollama (${API_BASE})
+
+请确保 Ollama 服务正在运行`, 'error', 8000);
         
-请确保：
-1. Ollama 服务正在运行
-2. 端口是 11434`, 'error', 10000);
+        // 显示连接失败的界面提示
+        const agentList = document.getElementById('agentList');
+        const noAgents = document.getElementById('noAgents');
+        agentList.innerHTML = '';
+        noAgents.style.display = 'block';
+        noAgents.innerHTML = `
+            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
+            <div style="color: #ef4444; font-weight: 500;">无法连接到 Ollama</div>
+            <div style="font-size: 12px; margin-top: 10px; color: #9ca3af; line-height: 1.5;">
+                请确保 Ollama 正在运行<br>
+                <br>
+                <strong>启动方法：</strong><br>
+                • macOS/Linux: 从应用启动<br>
+                • Windows: 从开始菜单启动<br>
+                <br>
+                端口: ${API_BASE}
+            </div>
+            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #2563eb; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">
+                重新连接
+            </button>
+        `;
+        return; // 不再继续加载，避免后续的 loadModels 再次报错
     }
     
     loadModels();
