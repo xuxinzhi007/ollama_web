@@ -105,7 +105,7 @@ function renderAgentList() {
         // 信息
         const info = document.createElement('div');
         info.className = 'agent-info';
-        info.onclick = () => selectAgent(agent);
+        info.onclick = () => selectAgentMobile(agent);
         
         const name = document.createElement('div');
         name.className = 'agent-name';
@@ -714,6 +714,25 @@ function addMessage(role, content) {
 function clearChat() {
     chatHistory = [];
     document.getElementById('chatArea').innerHTML = '';
+}
+
+// 移动端侧边栏切换
+function toggleMobileSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobileOverlay');
+    
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('show');
+}
+
+// 选择智能体后自动关闭移动端侧边栏
+function selectAgentMobile(agent) {
+    selectAgent(agent);
+    
+    // 如果是移动端，关闭侧边栏
+    if (window.innerWidth <= 768) {
+        toggleMobileSidebar();
+    }
 }
 
 // 页面加载时初始化
