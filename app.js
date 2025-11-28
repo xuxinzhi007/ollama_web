@@ -422,39 +422,65 @@ async function saveAgent() {
         return;
     }
     
-    // 生成模型名称（使用小写和连字符）
-    const modelName = editingAgent ? editingAgent.modelName : displayName.toLowerCase().replace(/\s+/g, '-');
+    // 生成模型名称（只保留字母、数字、连字符、下划线）
+    let modelName;
+    if (editingAgent) {
+        modelName = editingAgent.modelName;
+    } else {
+        // 移除所有非法字符，只保留字母、数字、连字符、下划线
+        modelName = displayName
+            .toLowerCase()
+            .replace(/[^a-z0-9-_]/g, '-') // 将非法字符替换为连字符
+            .replace(/-+/g, '-') // 合并多个连字符
+            .replace(/^-|-$/g, ''); // 移除首尾连字符
+        
+        // 如果全是中文导致名称为空，使用时间戳
+        if (!modelName || modelName === '-') {
+            modelName = 'agent-' + Date.now();
+        }
+    }
     
-    // 生成 Modelfile
-    let modelfile = `FROM ${baseModel}
-
-PARAMETER temperature ${temp}
-PARAMETER top_p ${topp}
-PARAMETER top_k ${topk}
-PARAMETER repeat_penalty ${repeat}`;
+    console.log('创建智能体:', {
+        displayName,
+        modelName,
+        baseModel
+    });
+    
+    // 生成 Modelfile（确保格式正确）
+    const lines = [
+        `FROM ${baseModel}`,
+        '',
+        `PARAMETER temperature ${temp}`,
+        `PARAMETER top_p ${topp}`,
+        `PARAMETER top_k ${topk}`,
+        `PARAMETER repeat_penalty ${repeat}`
+    ];
 
     // 添加高级参数（如果不是默认值）
     if (numCtx !== '2048') {
-        modelfile += `\nPARAMETER num_ctx ${numCtx}`;
+        lines.push(`PARAMETER num_ctx ${numCtx}`);
     }
     if (numPredict !== '-1') {
-        modelfile += `\nPARAMETER num_predict ${numPredict}`;
+        lines.push(`PARAMETER num_predict ${numPredict}`);
     }
     if (seed !== '0') {
-        modelfile += `\nPARAMETER seed ${seed}`;
+        lines.push(`PARAMETER seed ${seed}`);
     }
     if (stopSeq) {
         const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
         stops.forEach(stop => {
-            modelfile += `\nPARAMETER stop "${stop}"`;
+            lines.push(`PARAMETER stop "${stop}"`);
         });
     }
 
-    modelfile += `
-
-SYSTEM """
-${systemPrompt || '你是一个友好的AI助手。'}
-"""`;
+    // 添加 SYSTEM 部分
+    lines.push('');
+    lines.push('SYSTEM """');
+    lines.push(systemPrompt || '你是一个友好的AI助手。');
+    lines.push('"""');
+    
+    // 组合成 Modelfile
+    const modelfile = lines.join('\n');
     
     const statusDiv = document.getElementById('agentStatus');
     statusDiv.innerHTML = '<div class="status">正在保存...</div>';
@@ -473,12 +499,45 @@ ${systemPrompt || '你是一个友好的AI助手。'}
     }
     
     // 创建模型
+    console.log('=== 创建智能体请求 ===');
+    console.log('模型名称:', modelName);
+    console.log('API 地址:', `${API_BASE}/api/create`);
+    console.log('Modelfile 内容:');
+    console.log(modelfile);
+    console.log('======================');
+    
+    // 显示在界面上供调试
+    statusDiv.innerHTML = `<div class="status">正在创建模型: ${modelName}<br><small>查看控制台了解详情</small></div>`;
+    
     try {
+        const requestBody = { 
+            name: modelName, 
+            modelfile: modelfile,
+            stream: true 
+        };
+        
+        console.log('请求体 (格式化):');
+        console.log(JSON.stringify(requestBody, null, 2));
+        console.log('\nModelfile 原始内容:');
+        console.log(modelfile);
+        console.log('\nModelfile 字节长度:', modelfile.length);
+        console.log('包含换行符数量:', (modelfile.match(/\n/g) || []).length);
+        
         const response = await fetch(`${API_BASE}/api/create`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: modelName, modelfile, stream: true })
+            headers: { 
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
         });
+        
+        console.log('响应状态:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('错误响应:', errorText);
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
         
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -501,10 +560,12 @@ ${systemPrompt || '你是一个友好的AI助手。'}
         }
         
         statusDiv.innerHTML = '<div class="status success">保存成功！</div>';
-        showToast(`智能体 "${displayName}" ${editingAgent ? '更新' : '创建'}成功！`, 'success');
+        console.log('智能体创建成功:', modelName);
+        showToast(`智能体 "${displayName}" ${editingAgent ? '更新' : '创建'}成功！模型名: ${modelName}`, 'success', 5000);
         
         setTimeout(() => {
             closeAgentEditor();
+            console.log('重新加载模型列表...');
             loadModels();
         }, 1000);
         
@@ -1050,6 +1111,90 @@ window.copyCommand = function(elementId) {
     }).catch(() => {
         showToast('复制失败，请手动复制', 'error');
     });
+}
+
+// 下载 Modelfile
+window.downloadModelfile = function() {
+    const displayName = document.getElementById('agentName').value.trim();
+    const baseModel = document.getElementById('baseModelSelect').value;
+    const systemPrompt = document.getElementById('systemPrompt').value.trim();
+    const temp = document.getElementById('temperature').value;
+    const topp = document.getElementById('top_p').value;
+    const topk = document.getElementById('top_k').value;
+    const repeat = document.getElementById('repeat_penalty').value;
+    const numCtx = document.getElementById('num_ctx').value;
+    const numPredict = document.getElementById('num_predict').value;
+    const seed = document.getElementById('seed').value;
+    const stopSeq = document.getElementById('stop_sequences').value.trim();
+    
+    if (!displayName || !baseModel) {
+        showToast('请填写智能体名称并选择底座模型', 'warning');
+        return;
+    }
+    
+    // 生成模型名称
+    let modelName = displayName
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    
+    if (!modelName || modelName === '-') {
+        modelName = 'agent-' + Date.now();
+    }
+    
+    // 生成 Modelfile
+    const lines = [
+        `FROM ${baseModel}`,
+        '',
+        `PARAMETER temperature ${temp}`,
+        `PARAMETER top_p ${topp}`,
+        `PARAMETER top_k ${topk}`,
+        `PARAMETER repeat_penalty ${repeat}`
+    ];
+    
+    if (numCtx !== '2048') {
+        lines.push(`PARAMETER num_ctx ${numCtx}`);
+    }
+    if (numPredict !== '-1') {
+        lines.push(`PARAMETER num_predict ${numPredict}`);
+    }
+    if (seed !== '0') {
+        lines.push(`PARAMETER seed ${seed}`);
+    }
+    if (stopSeq) {
+        const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
+        stops.forEach(stop => {
+            lines.push(`PARAMETER stop "${stop}"`);
+        });
+    }
+    
+    lines.push('');
+    lines.push('SYSTEM """');
+    lines.push(systemPrompt || '你是一个友好的AI助手。');
+    lines.push('"""');
+    
+    const modelfile = lines.join('\n');
+    
+    // 创建下载（无后缀名）
+    const blob = new Blob([modelfile], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Modelfile'; // 无后缀名
+    a.type = 'application/octet-stream';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    // 显示手动创建提示
+    const hint = document.getElementById('manualCreateHint');
+    const commandDiv = document.getElementById('createCommand');
+    commandDiv.textContent = `ollama create ${modelName} -f ~/Downloads/Modelfile`;
+    hint.style.display = 'block';
+    
+    showToast('Modelfile 已下载，请按提示手动创建', 'success', 5000);
 }
 
 // 移动端侧边栏切换

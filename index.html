@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ollama Web 面板</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🤖</text></svg>">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Microsoft YaHei', sans-serif; background: #1a1a1a; color: #e0e0e0; }
@@ -404,8 +405,9 @@
             </div>
             
             <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">智能体名称</label>
-                <input type="text" id="agentName" placeholder="例如: 我的助手" style="width: 100%;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">智能体名称（显示名）</label>
+                <input type="text" id="agentName" placeholder="例如: 我的助手、小美" style="width: 100%;">
+                <small style="color: #9ca3af; font-size: 11px;">💡 可以使用中文，系统会自动生成英文模型名</small>
             </div>
             
             <div style="margin-bottom: 15px;">
@@ -503,8 +505,22 @@
             
             <div style="display: flex; gap: 10px; margin-top: 15px;">
                 <button onclick="saveAgent()" class="primary" style="flex: 1;" id="saveAgentBtn">💾 保存智能体</button>
+                <button onclick="downloadModelfile()" style="flex: 1; background: #374151;">📥 下载 Modelfile</button>
             </div>
             <div id="agentStatus" style="margin-top: 10px;"></div>
+            
+            <div id="manualCreateHint" style="display: none; margin-top: 15px; padding: 15px; background: #1f2937; border-radius: 6px; border-left: 3px solid #f59e0b;">
+                <div style="color: #f59e0b; font-size: 13px; margin-bottom: 10px;">💡 手动创建方式（更可靠）</div>
+                <div style="font-size: 12px; color: #e0e0e0; line-height: 1.6;">
+                    <div style="margin-bottom: 8px;">1. 点击"下载 Modelfile"按钮</div>
+                    <div style="margin-bottom: 8px;">2. 在终端执行以下命令：</div>
+                    <div style="background: #374151; padding: 10px; border-radius: 4px; font-family: monospace; color: #10b981; font-size: 11px; margin-bottom: 8px; position: relative;">
+                        <div id="createCommand" style="overflow-x: auto; white-space: nowrap;">ollama create 模型名 -f ~/Downloads/Modelfile</div>
+                        <button onclick="copyCommand('createCommand')" style="position: absolute; right: 8px; top: 8px; padding: 4px 8px; background: #2563eb; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">复制</button>
+                    </div>
+                    <div style="font-size: 11px; color: #9ca3af;">3. 刷新页面查看新创建的智能体</div>
+                </div>
+            </div>
         </div>
     </div>
 
