@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Web 面板</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', sans-serif; background: #1a1a1a; color: #e0e0e0; }
+        .container { display: flex; height: 100vh; }
+        .sidebar { width: 280px; background: #252525; padding: 15px; border-right: 1px solid #333; overflow-y: auto; display: flex; flex-direction: column; }
+        .main { flex: 1; display: flex; flex-direction: column; }
+        .header { background: #252525; padding: 15px 20px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .chat-area { flex: 1; overflow-y: auto; padding: 20px; }
+        .input-area { padding: 20px; background: #252525; border-top: 1px solid #333; }
+        .message { margin-bottom: 20px; padding: 12px 16px; border-radius: 8px; max-width: 80%; }
+        .user { background: #2563eb; margin-left: auto; }
+        .assistant { background: #374151; }
+        select, input, textarea, button { 
+            background: #333; color: #e0e0e0; border: 1px solid #444; 
+            padding: 10px; border-radius: 6px; font-size: 14px; 
+        }
+        input[type="range"] { 
+            padding: 0; 
+            height: 6px; 
+            -webkit-appearance: none;
+            appearance: none;
+            background: #444;
+            border-radius: 3px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb { 
+            -webkit-appearance: none;
+            appearance: none;
+            background: #2563eb; 
+            width: 16px; 
+            height: 16px; 
+            border-radius: 50%; 
+            cursor: pointer; 
+        }
+        input[type="range"]::-moz-range-thumb { 
+            background: #2563eb; 
+            width: 16px; 
+            height: 16px; 
+            border-radius: 50%; 
+            cursor: pointer; 
+            border: none; 
+        }
+        button { cursor: pointer; transition: all 0.2s; }
+        button:hover { background: #444; }
+        button.primary { background: #2563eb; }
+        button.primary:hover { background: #1d4ed8; }
+        textarea { width: 100%; resize: vertical; font-family: inherit; }
+        .input-box { display: flex; gap: 10px; }
+        .input-box textarea { flex: 1; min-height: 60px; }
+        h3 { margin-bottom: 15px; color: #fff; }
+        .agent-item { padding: 12px; margin: 8px 0; background: #333; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; position: relative; transition: all 0.2s; }
+        .agent-item:hover { background: #444; transform: translateX(2px); }
+        .agent-item.active { background: #2563eb; box-shadow: 0 0 0 2px #1d4ed8; }
+        .agent-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .agent-info { flex: 1; min-width: 0; }
+        .agent-name { font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .agent-base { font-size: 11px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .agent-menu { padding: 4px 8px; opacity: 0; transition: opacity 0.2s; }
+        .agent-item:hover .agent-menu { opacity: 1; }
+        .menu-btn { background: transparent; border: none; color: #9ca3af; cursor: pointer; padding: 4px; font-size: 16px; }
+        .menu-btn:hover { color: #fff; }
+        .dropdown-menu { position: absolute; right: 10px; top: 45px; background: #1f2937; border: 1px solid #444; border-radius: 6px; padding: 5px; z-index: 100; display: none; min-width: 100px; }
+        .dropdown-menu.show { display: block; }
+        .dropdown-item { padding: 8px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; white-space: nowrap; }
+        .dropdown-item:hover { background: #374151; }
+        .new-agent-btn { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; margin-bottom: 15px; }
+        .new-agent-btn:hover { background: #1d4ed8; }
+        .sidebar-footer { margin-top: auto; padding-top: 15px; border-top: 1px solid #333; }
+        .tab-buttons { display: flex; gap: 10px; margin-bottom: 15px; }
+        .tab-buttons button { flex: 1; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .modelfile-editor { height: 400px; font-family: 'Consolas', monospace; }
+        .status { padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+        .status.success { background: #10b981; color: white; }
+        .status.error { background: #ef4444; color: white; }
+        
+        /* Toast 通知 */
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
+        .toast { 
+            background: #1f2937; 
+            color: white; 
+            padding: 12px 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 250px;
+            animation: slideIn 0.3s ease-out;
+        }
+        .toast.success { border-left: 4px solid #10b981; }
+        .toast.error { border-left: 4px solid #ef4444; }
+        .toast.info { border-left: 4px solid #3b82f6; }
+        .toast.warning { border-left: 4px solid #f59e0b; }
+        
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(400px); opacity: 0; }
+        }
+        
+        .toast.hiding { animation: slideOut 0.3s ease-out; }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+    
+    <div class="container">
+        <div class="sidebar">
+            <h3 style="margin: 0 0 15px 0;">💬 我的智能体</h3>
+            
+            <button class="new-agent-btn" onclick="createNewAgent()">+ 新建智能体</button>
+            
+            <div id="agentList"></div>
+            
+            <div id="noAgents" style="padding: 20px 10px; color: #9ca3af; font-size: 13px; text-align: center; display: none;">
+                <div style="font-size: 40px; margin-bottom: 10px;">🤖</div>
+                <div>还没有智能体</div>
+                <div style="font-size: 12px; margin-top: 5px;">点击上方按钮创建第一个</div>
+            </div>
+            
+            <div class="sidebar-footer">
+                <button onclick="toggleManagePanel()" style="width: 100%; padding: 8px; background: #374151; font-size: 13px;">⚙️ 管理底座模型</button>
+            </div>
+        </div>
+        
+        <div class="main">
+            <div class="header">
+                <div style="flex: 1; font-size: 16px; font-weight: 500;" id="currentAgentName">选择一个智能体开始对话</div>
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="checkbox" id="keepHistory" checked>
+                    <span style="font-size: 13px;">保留历史</span>
+                </label>
+                <button onclick="clearChat()" style="font-size: 13px;">清空对话</button>
+            </div>
+            
+            <div class="chat-area" id="chatArea"></div>
+            
+            <div class="input-area">
+                <div class="input-box">
+                    <textarea id="userInput" placeholder="输入消息..." onkeydown="if(event.ctrlKey && event.key==='Enter') sendMessage()"></textarea>
+                    <button onclick="sendMessage()" class="primary">发送<br>(Ctrl+Enter)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 管理底座模型面板 -->
+    <div id="managePanel" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; padding: 40px;">
+        <div style="background: #252525; border-radius: 8px; max-width: 600px; margin: 0 auto; padding: 20px; max-height: 90vh; overflow-y: auto;">
+            <h3>🔹 底座模型管理</h3>
+            
+            <div style="margin: 20px 0;">
+                <h4 style="margin-bottom: 10px;">拉取新模型</h4>
+                <input type="text" id="pullModelInput" placeholder="例如: qwen2.5:7b, gemma2:9b" style="width: 100%; margin-bottom: 10px;">
+                <button onclick="pullModel()" class="primary" style="width: 100%;">拉取模型</button>
+                <div id="pullStatus" style="margin-top: 10px;"></div>
+            </div>
+            
+            <div style="margin: 20px 0;">
+                <h4 style="margin-bottom: 10px;">已安装的底座模型</h4>
+                <div id="baseModelList"></div>
+            </div>
+            
+            <button onclick="closeManagePanel()" style="margin-top: 20px; width: 100%;">关闭</button>
+        </div>
+    </div>
+
+    <!-- 智能体编辑器 -->
+    <div id="agentEditor" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; padding: 40px;">
+        <div style="background: #252525; border-radius: 8px; max-width: 800px; margin: 0 auto; padding: 20px; max-height: 90vh; overflow-y: auto;">
+            <h3 id="editorTitle">创建智能体</h3>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">智能体名称</label>
+                <input type="text" id="agentName" placeholder="例如: 我的助手" style="width: 100%;">
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">选择底座模型</label>
+                <select id="baseModelSelect" style="width: 100%;">
+                    <option value="">选择底座模型...</option>
+                </select>
+                <small style="color: #9ca3af;">如果没有底座模型，请先在"管理底座模型"中拉取</small>
+            </div>
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <button onclick="toggleParamPanel()" style="flex: 1;">⚙️ 参数配置</button>
+                    <button onclick="insertTemplate()" style="flex: 1;">📝 插入模板</button>
+                </div>
+                
+                <div id="paramPanel" style="display: none; background: #1f2937; padding: 15px; border-radius: 6px; margin-bottom: 10px;">
+                    <h4 style="margin-bottom: 10px; color: #fff;">参数调节</h4>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>🌡️ Temperature (创造性)</span>
+                            <span id="tempValue">0.8</span>
+                        </label>
+                        <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.8" style="width: 100%;" oninput="updateParamValue('temp', this.value)">
+                        <small style="color: #9ca3af;">低=保守准确，高=创意随机 (角色扮演推荐: 0.8-1.2)</small>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>🎯 Top P (多样性)</span>
+                            <span id="toppValue">0.9</span>
+                        </label>
+                        <input type="range" id="top_p" min="0" max="1" step="0.05" value="0.9" style="width: 100%;" oninput="updateParamValue('topp', this.value)">
+                        <small style="color: #9ca3af;">控制词汇选择范围 (推荐: 0.9-0.95)</small>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>🔢 Top K (候选词数)</span>
+                            <span id="topkValue">40</span>
+                        </label>
+                        <input type="range" id="top_k" min="1" max="100" step="1" value="40" style="width: 100%;" oninput="updateParamValue('topk', this.value)">
+                        <small style="color: #9ca3af;">每次选择考虑的词数 (推荐: 40-60)</small>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>🔁 Repeat Penalty (防重复)</span>
+                            <span id="repeatValue">1.1</span>
+                        </label>
+                        <input type="range" id="repeat_penalty" min="1" max="2" step="0.05" value="1.1" style="width: 100%;" oninput="updateParamValue('repeat', this.value)">
+                        <small style="color: #9ca3af;">惩罚重复内容 (推荐: 1.1-1.2)</small>
+                    </div>
+                    
+                    <button onclick="applyParams()" class="primary" style="width: 100%;">应用参数到 Modelfile</button>
+                </div>
+                
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 10px; font-weight: 500;">参数配置</label>
+                <div style="background: #1f2937; padding: 15px; border-radius: 6px;">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
+                            <span>🌡️ Temperature (创造性)</span>
+                            <span id="tempValue">0.8</span>
+                        </label>
+                        <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.8" style="width: 100%;" oninput="updateParamValue('temp', this.value)">
+                        <small style="color: #9ca3af; font-size: 11px;">低=保守准确，高=创意随机 (角色扮演推荐: 0.8-1.2)</small>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
+                            <span>🎯 Top P (多样性)</span>
+                            <span id="toppValue">0.9</span>
+                        </label>
+                        <input type="range" id="top_p" min="0" max="1" step="0.05" value="0.9" style="width: 100%;" oninput="updateParamValue('topp', this.value)">
+                        <small style="color: #9ca3af; font-size: 11px;">控制词汇选择范围 (推荐: 0.9-0.95)</small>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
+                            <span>🔢 Top K (候选词数)</span>
+                            <span id="topkValue">40</span>
+                        </label>
+                        <input type="range" id="top_k" min="1" max="100" step="1" value="40" style="width: 100%;" oninput="updateParamValue('topk', this.value)">
+                        <small style="color: #9ca3af; font-size: 11px;">每次选择考虑的词数 (推荐: 40-60)</small>
+                    </div>
+                    <div>
+                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
+                            <span>🔁 Repeat Penalty (防重复)</span>
+                            <span id="repeatValue">1.1</span>
+                        </label>
+                        <input type="range" id="repeat_penalty" min="1" max="2" step="0.05" value="1.1" style="width: 100%;" oninput="updateParamValue('repeat', this.value)">
+                        <small style="color: #9ca3af; font-size: 11px;">惩罚重复内容 (推荐: 1.1-1.2)</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <label style="font-weight: 500;">系统提示词（角色设定）</label>
+                    <button onclick="insertTemplate()" style="padding: 4px 10px; font-size: 12px; background: #374151;">📝 插入模板</button>
+                </div>
+                <textarea id="systemPrompt" style="width: 100%; min-height: 200px; font-family: inherit;" placeholder="直接写角色设定即可，不需要写 FROM 等内容&#10;&#10;例如：&#10;你是一个活泼开朗的AI助手小美，性格特点：&#10;- 说话风格轻松幽默&#10;- 喜欢用表情符号&#10;- 擅长鼓励和安慰他人"></textarea>
+                <small style="color: #9ca3af; font-size: 11px;">💡 提示：只需要写角色的性格、背景、说话风格等，系统会自动生成完整的 Modelfile</small>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button onclick="saveAgent()" class="primary" style="flex: 1;" id="saveAgentBtn">💾 保存智能体</button>
+                <button onclick="closeAgentEditor()" style="flex: 1;">取消</button>
+            </div>
+            <div id="agentStatus" style="margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+""
