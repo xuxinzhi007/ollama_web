@@ -18,7 +18,7 @@
 
 **方法 1 - Python（推荐）:**
 ```bash
-cd ollama-web
+cd ollama_web
 python server.py
 ```
 
@@ -35,26 +35,26 @@ npx http-server -p 8080
 
 **方法 1 - Python 3（推荐）:**
 ```bash
-cd ollama-web
+cd ollama_web
 python3 server.py
 ```
 
 **方法 2 - Python 内置服务器:**
 ```bash
-cd ollama-web
+cd ollama_web
 python3 -m http.server 8080
 ```
 
 **方法 3 - Node.js:**
 ```bash
-cd ollama-web
+cd ollama_web
 npx http-server -p 8080
 ```
 
 #### Linux 系统
 
 ```bash
-cd ollama-web
+cd ollam_web
 python3 server.py
 ```
 
