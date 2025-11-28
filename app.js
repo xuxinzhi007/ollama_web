@@ -629,13 +629,15 @@ async function saveAgent() {
     // 如果是编辑，先删除旧模型
     if (editingAgent) {
         try {
+            statusDiv.innerHTML = '<div class="status">正在删除旧版本...</div>';
             await fetch(`${API_BASE}/api/delete`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: editingAgent.modelName })
             });
+            console.log('旧模型已删除');
         } catch (error) {
-            console.log('删除旧模型失败，继续创建');
+            console.log('删除旧模型失败，继续创建:', error);
         }
     }
     
@@ -647,22 +649,44 @@ async function saveAgent() {
     console.log(modelfile);
     console.log('======================');
     
-    // 显示在界面上供调试
-    statusDiv.innerHTML = `<div class="status">正在创建模型: ${modelName}<br><small>查看控制台了解详情</small></div>`;
+    statusDiv.innerHTML = `<div class="status">正在创建模型: ${modelName}...</div>`;
     
     try {
-        const requestBody = { 
-            name: modelName, 
-            modelfile: modelfile,
-            stream: true 
+        // Ollama API 需要 from、system 和 parameters 字段
+        const parameters = {
+            temperature: parseFloat(temp),
+            top_p: parseFloat(topp),
+            top_k: parseInt(topk),
+            repeat_penalty: parseFloat(repeat)
         };
         
-        console.log('请求体 (格式化):');
-        console.log(JSON.stringify(requestBody, null, 2));
-        console.log('\nModelfile 原始内容:');
-        console.log(modelfile);
-        console.log('\nModelfile 字节长度:', modelfile.length);
-        console.log('包含换行符数量:', (modelfile.match(/\n/g) || []).length);
+        // 添加高级参数（如果不是默认值）
+        if (numCtx !== '2048') {
+            parameters.num_ctx = parseInt(numCtx);
+        }
+        if (numPredict !== '-1') {
+            parameters.num_predict = parseInt(numPredict);
+        }
+        if (seed !== '0') {
+            parameters.seed = parseInt(seed);
+        }
+        if (stopSeq) {
+            const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
+            if (stops.length > 0) {
+                parameters.stop = stops;
+            }
+        }
+        
+        const requestBody = { 
+            name: modelName, 
+            from: baseModel,
+            system: systemPrompt || '你是一个友好的AI助手。',
+            parameters: parameters,
+            stream: true
+        };
+        
+        console.log('发送请求到:', `${API_BASE}/api/create`);
+        console.log('请求体:', JSON.stringify(requestBody, null, 2));
         
         const response = await fetch(`${API_BASE}/api/create`, {
             method: 'POST',
@@ -676,12 +700,21 @@ async function saveAgent() {
         
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('错误响应:', errorText);
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
+            console.error('错误响应内容:', errorText);
+            
+            // 尝试解析错误信息
+            try {
+                const errorJson = JSON.parse(errorText);
+                throw new Error(errorJson.error || errorText);
+            } catch (e) {
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
         }
         
+        // 读取响应流
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let lastStatus = '';
         
         while (true) {
             const { done, value } = await reader.read();
@@ -693,37 +726,59 @@ async function saveAgent() {
             for (const line of lines) {
                 try {
                     const json = JSON.parse(line);
+                    console.log('创建进度:', json);
+                    
                     if (json.status) {
-                        statusDiv.innerHTML = `<div class="status">${json.status}</div>`;
+                        lastStatus = json.status;
+                        // 翻译状态信息
+                        const statusMap = {
+                            'parsing modelfile': '正在解析 Modelfile',
+                            'looking up model': '正在查找底座模型',
+                            'creating system layer': '正在创建系统层',
+                            'creating parameters layer': '正在创建参数层',
+                            'creating config layer': '正在创建配置层',
+                            'writing manifest': '正在写入清单',
+                            'success': '创建成功'
+                        };
+                        const displayStatus = statusMap[json.status.toLowerCase()] || json.status;
+                        statusDiv.innerHTML = `<div class="status">${displayStatus}</div>`;
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.log('非 JSON 响应:', line);
+                }
             }
         }
         
-        statusDiv.innerHTML = '<div class="status success">保存成功！</div>';
-        console.log('智能体创建成功:', modelName);
-        
-        // 保存智能体配置到 localStorage
-        const agentConfig = {
-            modelName,
-            displayName,
-            baseModel,
-            systemPrompt,
-            parameters: { temp, topp, topk, repeat, numCtx, numPredict, seed, stopSeq }
-        };
-        localStorage.setItem(`agent_config_${modelName}`, JSON.stringify(agentConfig));
-        
-        showToast(`智能体 "${displayName}" ${editingAgent ? '更新' : '创建'}成功！模型名: ${modelName}`, 'success', 5000);
-        
-        setTimeout(() => {
-            closeAgentEditor();
-            console.log('重新加载模型列表...');
-            loadModels();
-        }, 1000);
+        // 检查最后的状态
+        if (lastStatus.toLowerCase() === 'success' || lastStatus === '') {
+            statusDiv.innerHTML = '<div class="status success">✓ 保存成功！</div>';
+            console.log('智能体创建成功:', modelName);
+            
+            // 保存智能体配置到 localStorage
+            const agentConfig = {
+                modelName,
+                displayName,
+                baseModel,
+                systemPrompt,
+                parameters: { temp, topp, topk, repeat, numCtx, numPredict, seed, stopSeq }
+            };
+            localStorage.setItem(`agent_config_${modelName}`, JSON.stringify(agentConfig));
+            
+            showToast(`智能体 "${displayName}" ${editingAgent ? '更新' : '创建'}成功！`, 'success', 4000);
+            
+            setTimeout(() => {
+                closeAgentEditor();
+                console.log('重新加载模型列表...');
+                loadModels();
+            }, 1500);
+        } else {
+            throw new Error('创建过程未正常完成');
+        }
         
     } catch (error) {
-        statusDiv.innerHTML = `<div class="status error">错误: ${error.message}</div>`;
-        showToast('保存失败: ' + error.message, 'error');
+        console.error('保存智能体失败:', error);
+        statusDiv.innerHTML = `<div class="status error">✕ 错误: ${error.message}</div>`;
+        showToast('保存失败: ' + error.message, 'error', 6000);
     }
 }
 
