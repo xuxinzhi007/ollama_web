@@ -172,7 +172,7 @@ function renderAgentList() {
     
     agents.forEach(agent => {
         const item = document.createElement('div');
-        item.className = 'agent-item';
+        item.className = 'agent-item fade-in';
         if (currentAgent && currentAgent.name === agent.name) {
             item.classList.add('active');
         }
@@ -197,6 +197,14 @@ function renderAgentList() {
         
         info.appendChild(name);
         info.appendChild(base);
+        
+        // 在线状态指示器（当前选中的智能体）
+        if (currentAgent && currentAgent.name === agent.name) {
+            const status = document.createElement('div');
+            status.className = 'agent-status';
+            status.title = '当前对话';
+            item.appendChild(status);
+        }
         
         // 菜单按钮
         const menu = document.createElement('div');
@@ -283,11 +291,26 @@ function selectAgent(agent) {
     // 加载新智能体的聊天记录
     loadChatHistory();
     
-    // 隐藏欢迎页面，显示聊天区域
+    // 隐藏欢迎页面，显示聊天区域和输入框
     const welcomeScreen = document.getElementById('welcomeScreen');
     const chatArea = document.getElementById('chatArea');
+    const inputArea = document.getElementById('inputArea');
+    const backToHomeBtn = document.getElementById('backToHomeBtn');
+    const keepHistoryLabel = document.getElementById('keepHistoryLabel');
+    const clearChatBtn = document.getElementById('clearChatBtn');
+    
     if (welcomeScreen) welcomeScreen.style.display = 'none';
     if (chatArea) chatArea.style.display = 'block';
+    if (inputArea) inputArea.style.display = 'block';
+    if (backToHomeBtn) backToHomeBtn.style.display = 'flex';
+    if (keepHistoryLabel) keepHistoryLabel.style.display = 'flex';
+    if (clearChatBtn) clearChatBtn.style.display = 'flex';
+    
+    // 聚焦输入框
+    const userInput = document.getElementById('userInput');
+    if (userInput) {
+        setTimeout(() => userInput.focus(), 100);
+    }
 }
 
 // 显示智能体菜单
@@ -624,12 +647,12 @@ async function saveAgent() {
     const modelfile = lines.join('\n');
     
     const statusDiv = document.getElementById('agentStatus');
-    statusDiv.innerHTML = '<div class="status">正在保存...</div>';
+    statusDiv.innerHTML = '<div class="loading-spinner">正在保存智能体...</div>';
     
     // 如果是编辑，先删除旧模型
     if (editingAgent) {
         try {
-            statusDiv.innerHTML = '<div class="status">正在删除旧版本...</div>';
+            statusDiv.innerHTML = '<div class="loading-spinner">正在删除旧版本...</div>';
             await fetch(`${API_BASE}/api/delete`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
@@ -649,7 +672,7 @@ async function saveAgent() {
     console.log(modelfile);
     console.log('======================');
     
-    statusDiv.innerHTML = `<div class="status">正在创建模型: ${modelName}...</div>`;
+    statusDiv.innerHTML = `<div class="loading-spinner">正在创建模型: ${modelName}</div>`;
     
     try {
         // Ollama API 需要 from、system 和 parameters 字段
@@ -741,7 +764,7 @@ async function saveAgent() {
                             'success': '创建成功'
                         };
                         const displayStatus = statusMap[json.status.toLowerCase()] || json.status;
-                        statusDiv.innerHTML = `<div class="status">${displayStatus}</div>`;
+                        statusDiv.innerHTML = `<div class="loading-spinner">${displayStatus}</div>`;
                     }
                 } catch (e) {
                     console.log('非 JSON 响应:', line);
@@ -1184,6 +1207,14 @@ async function sendMessage() {
         return;
     }
     
+    // 禁用输入框和发送按钮
+    input.disabled = true;
+    const sendButtons = document.querySelectorAll('.input-box button');
+    sendButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+    });
+    
     // 添加用户消息
     addMessage('user', message);
     input.value = '';
@@ -1210,6 +1241,10 @@ async function sendMessage() {
         const decoder = new TextDecoder();
         let fullResponse = '';
         
+        // 清空"思考中"的内容
+        const contentDiv = assistantDiv.querySelector('.message-content');
+        if (contentDiv) contentDiv.textContent = '';
+        
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -1222,19 +1257,56 @@ async function sendMessage() {
                     const json = JSON.parse(line);
                     if (json.message?.content) {
                         fullResponse += json.message.content;
-                        assistantDiv.textContent = fullResponse;
+                        if (contentDiv) {
+                            contentDiv.textContent = fullResponse;
+                        } else {
+                            assistantDiv.textContent = fullResponse;
+                        }
                     }
                 } catch (e) {}
             }
         }
         
-        chatHistory.push({ role: 'assistant', content: fullResponse });
+        chatHistory.push({ role: 'assistant', content: fullResponse, timestamp: Date.now() });
+        
+        // 更新消息操作按钮
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions';
+        
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'message-action-btn';
+        copyBtn.textContent = '📋';
+        copyBtn.title = '复制';
+        copyBtn.onclick = (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(fullResponse).then(() => {
+                showToast('已复制到剪贴板', 'success', 2000);
+            });
+        };
+        
+        actionsDiv.appendChild(copyBtn);
+        assistantDiv.appendChild(actionsDiv);
         
         // 保存聊天记录
         saveChatHistory();
         
     } catch (error) {
-        assistantDiv.textContent = '错误: ' + error.message;
+        const contentDiv = assistantDiv.querySelector('.message-content');
+        const errorMsg = '错误: ' + error.message;
+        if (contentDiv) {
+            contentDiv.textContent = errorMsg;
+        } else {
+            assistantDiv.textContent = errorMsg;
+        }
+        showToast('发送失败: ' + error.message, 'error');
+    } finally {
+        // 恢复输入框和发送按钮
+        input.disabled = false;
+        input.focus();
+        sendButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+        });
     }
 }
 
@@ -1243,12 +1315,44 @@ function addMessage(role, content) {
     const chatArea = document.getElementById('chatArea');
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}`;
-    messageDiv.textContent = content;
+    
+    // 消息内容
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = content;
+    messageDiv.appendChild(contentDiv);
+    
+    // 时间戳
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'message-time';
+    timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    messageDiv.appendChild(timeDiv);
+    
+    // 操作按钮（仅助手消息）
+    if (role === 'assistant' && content !== '思考中...') {
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions';
+        
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'message-action-btn';
+        copyBtn.textContent = '📋';
+        copyBtn.title = '复制';
+        copyBtn.onclick = (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(content).then(() => {
+                showToast('已复制到剪贴板', 'success', 2000);
+            });
+        };
+        
+        actionsDiv.appendChild(copyBtn);
+        messageDiv.appendChild(actionsDiv);
+    }
+    
     chatArea.appendChild(messageDiv);
     chatArea.scrollTop = chatArea.scrollHeight;
     
     if (role === 'user') {
-        chatHistory.push({ role: 'user', content });
+        chatHistory.push({ role: 'user', content, timestamp: Date.now() });
     }
     
     return messageDiv;
@@ -1276,7 +1380,40 @@ function loadChatHistory() {
                 chatHistory.forEach(msg => {
                     const messageDiv = document.createElement('div');
                     messageDiv.className = `message ${msg.role}`;
-                    messageDiv.textContent = msg.content;
+                    
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'message-content';
+                    contentDiv.textContent = msg.content;
+                    messageDiv.appendChild(contentDiv);
+                    
+                    // 添加时间戳（如果有）
+                    if (msg.timestamp) {
+                        const timeDiv = document.createElement('div');
+                        timeDiv.className = 'message-time';
+                        timeDiv.textContent = new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                        messageDiv.appendChild(timeDiv);
+                    }
+                    
+                    // 添加复制按钮（助手消息）
+                    if (msg.role === 'assistant') {
+                        const actionsDiv = document.createElement('div');
+                        actionsDiv.className = 'message-actions';
+                        
+                        const copyBtn = document.createElement('button');
+                        copyBtn.className = 'message-action-btn';
+                        copyBtn.textContent = '📋';
+                        copyBtn.title = '复制';
+                        copyBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(msg.content).then(() => {
+                                showToast('已复制到剪贴板', 'success', 2000);
+                            });
+                        };
+                        
+                        actionsDiv.appendChild(copyBtn);
+                        messageDiv.appendChild(actionsDiv);
+                    }
+                    
                     chatArea.appendChild(messageDiv);
                 });
                 chatArea.scrollTop = chatArea.scrollHeight;
@@ -1296,6 +1433,88 @@ function clearChat() {
         const key = `chat_${currentAgent.modelName}`;
         localStorage.removeItem(key);
     }
+    showToast('对话已清空', 'success', 2000);
+}
+
+// 切换欢迎页 Tab
+window.switchWelcomeTab = function(tab) {
+    // 更新 Tab 按钮状态
+    document.querySelectorAll('.welcome-tab').forEach(btn => {
+        if (btn.dataset.tab === tab) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // 切换内容
+    document.getElementById('quickTab').style.display = tab === 'quick' ? 'flex' : 'none';
+    document.getElementById('plazaTab').style.display = tab === 'plaza' ? 'block' : 'none';
+    
+    // 如果切换到广场，渲染智能体列表
+    if (tab === 'plaza') {
+        renderPlazaAgents();
+    }
+}
+
+// 渲染广场智能体列表
+function renderPlazaAgents() {
+    const container = document.getElementById('plazaAgentList');
+    const emptyDiv = document.getElementById('plazaEmpty');
+    
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (agents.length === 0) {
+        container.style.display = 'none';
+        if (emptyDiv) emptyDiv.style.display = 'block';
+        return;
+    }
+    
+    container.style.display = 'grid';
+    if (emptyDiv) emptyDiv.style.display = 'none';
+    
+    agents.forEach(agent => {
+        const card = document.createElement('div');
+        card.className = 'plaza-agent-card fade-in';
+        card.onclick = () => {
+            selectAgent(agent);
+            // 关闭移动端侧边栏
+            if (window.innerWidth <= 768) {
+                toggleMobileSidebar();
+            }
+        };
+        
+        card.innerHTML = `
+            <div class="plaza-agent-avatar">${agent.displayName.charAt(0).toUpperCase()}</div>
+            <div style="margin-bottom: 12px;">
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px; color: #e0e0e0;">${agent.displayName}</div>
+                <div style="font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 4px;">
+                    <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
+                    </svg>
+                    ${agent.baseModel}
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button onclick="event.stopPropagation(); selectAgent(${JSON.stringify(agent).replace(/"/g, '&quot;')})" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; transition: all 0.2s;">
+                    <svg style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    开始对话
+                </button>
+                <button onclick="event.stopPropagation(); editAgent(${JSON.stringify(agent).replace(/"/g, '&quot;')})" style="padding: 8px 12px; background: #374151; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; transition: all 0.2s;">
+                    <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+        
+        container.appendChild(card);
+    });
 }
 
 // 显示存储位置信息
@@ -1507,16 +1726,39 @@ function renderRecentAgents() {
     }
     
     container.innerHTML = `
-        <h3 style="margin-bottom: 15px; font-size: 16px; color: #e0e0e0;">最近使用</h3>
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
-            ${recent.map(agent => `
-                <button onclick="selectAgentByName('${agent.modelName}')" style="padding: 12px 20px; background: #374151; border: none; border-radius: 6px; color: white; cursor: pointer; transition: all 0.2s;">
-                    <div style="font-weight: 500;">${agent.displayName}</div>
-                    <div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">${new Date(agent.lastUsed).toLocaleDateString()}</div>
-                </button>
-            `).join('')}
+        <div style="margin-bottom: 20px;">
+            <h3 style="margin-bottom: 15px; font-size: 15px; color: #e0e0e0; display: flex; align-items: center; gap: 8px;">
+                <svg style="width: 18px; height: 18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6v6l4 2"/>
+                </svg>
+                最近使用
+            </h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;">
+                ${recent.map(agent => `
+                    <button onclick="selectAgentByName('${agent.modelName}')" style="padding: 16px; background: linear-gradient(135deg, #374151 0%, #2d3748 100%); border: 1px solid #4b5563; border-radius: 10px; color: white; cursor: pointer; transition: all 0.3s; text-align: left; box-shadow: 0 2px 8px rgba(0,0,0,0.2);" onmouseover="this.style.transform='translateY(-2px)'; this.style.borderColor='#2563eb'; this.style.boxShadow='0 4px 12px rgba(37, 99, 235, 0.2)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='#4b5563'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.2)'">
+                        <div style="font-weight: 500; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${agent.displayName}</div>
+                        <div style="font-size: 11px; color: #9ca3af;">${formatRelativeTime(agent.lastUsed)}</div>
+                    </button>
+                `).join('')}
+            </div>
         </div>
     `;
+}
+
+// 格式化相对时间
+function formatRelativeTime(timestamp) {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return '刚刚';
+    if (minutes < 60) return `${minutes} 分钟前`;
+    if (hours < 24) return `${hours} 小时前`;
+    if (days < 7) return `${days} 天前`;
+    return new Date(timestamp).toLocaleDateString('zh-CN');
 }
 
 // 通过名称选择智能体
@@ -1541,15 +1783,65 @@ function restoreLastAgent() {
                 selectAgent(exists);
             } else {
                 // 智能体已被删除，显示欢迎页面
-                renderRecentAgents();
+                showWelcomeScreen();
             }
         } catch (e) {
             console.error('恢复智能体失败:', e);
+            showWelcomeScreen();
         }
     } else {
         // 没有上次选择的智能体，显示欢迎页面
-        renderRecentAgents();
+        showWelcomeScreen();
     }
+}
+
+// 显示欢迎页面
+function showWelcomeScreen() {
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const chatArea = document.getElementById('chatArea');
+    const inputArea = document.getElementById('inputArea');
+    const backToHomeBtn = document.getElementById('backToHomeBtn');
+    const keepHistoryLabel = document.getElementById('keepHistoryLabel');
+    const clearChatBtn = document.getElementById('clearChatBtn');
+    
+    if (welcomeScreen) welcomeScreen.style.display = 'flex';
+    if (chatArea) chatArea.style.display = 'none';
+    if (inputArea) inputArea.style.display = 'none';
+    if (backToHomeBtn) backToHomeBtn.style.display = 'none';
+    if (keepHistoryLabel) keepHistoryLabel.style.display = 'none';
+    if (clearChatBtn) clearChatBtn.style.display = 'none';
+    
+    // 清除当前智能体
+    currentAgent = null;
+    document.getElementById('currentAgentName').textContent = '选择一个智能体开始对话';
+    
+    // 更新侧边栏状态
+    renderAgentList();
+    
+    // 渲染最近使用
+    renderRecentAgents();
+    
+    // 如果在广场 Tab，渲染广场
+    const plazaTab = document.querySelector('.welcome-tab[data-tab="plaza"]');
+    if (plazaTab && plazaTab.classList.contains('active')) {
+        renderPlazaAgents();
+    }
+}
+
+// 返回首页
+window.backToHome = function() {
+    // 保存当前对话
+    if (currentAgent && chatHistory.length > 0) {
+        saveChatHistory();
+    }
+    
+    // 显示欢迎页面
+    showWelcomeScreen();
+    
+    // 清除 localStorage 中的最后选择
+    localStorage.removeItem('lastAgent');
+    
+    showToast('已返回首页', 'info', 2000);
 }
 
 // 页面加载时初始化
