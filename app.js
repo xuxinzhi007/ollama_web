@@ -1,74 +1,153 @@
+// ==========================================
+// 核心状态与全局函数定义 (UI 交互优先定义)
+// ==========================================
 const API_BASE = 'http://localhost:11434';
 let chatHistory = [];
-let currentAgent = null; // 当前选中的智能体
-let agents = []; // 所有智能体列表
-let baseModels = []; // 底座模型列表
-let editingAgent = null; // 正在编辑的智能体
-let isPulling = false; // 是否正在拉取模型
+let currentAgent = null; 
+let agents = []; 
+let baseModels = []; 
+let editingAgent = null; 
+let isPulling = false; 
+
+// 将 UI 控制函数挂载到 window，确保第一时间可用
+window.toggleManagePanel = function() {
+    const panel = document.getElementById('managePanel');
+    if (panel) panel.style.display = 'block';
+    renderBaseModelList(); // 打开时刷新列表
+};
+
+window.closeManagePanel = function() {
+    const panel = document.getElementById('managePanel');
+    if (panel) panel.style.display = 'none';
+};
+
+window.toggleMobileSidebar = function() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobileOverlay');
+    if (sidebar) sidebar.classList.toggle('open');
+    if (overlay) overlay.classList.toggle('show');
+};
+
+window.createNewAgent = function() {
+    editingAgent = null;
+    const title = document.getElementById('editorTitle');
+    const nameInput = document.getElementById('agentName');
+    const modelSelect = document.getElementById('baseModelSelect');
+    const prompt = document.getElementById('systemPrompt');
+    const status = document.getElementById('agentStatus');
+    const hint = document.getElementById('manualCreateHint');
+    
+    if (title) title.textContent = '创建智能体';
+    if (nameInput) nameInput.value = '';
+    if (modelSelect) modelSelect.value = '';
+    if (prompt) prompt.value = '';
+    if (status) status.innerHTML = '';
+    if (hint) hint.style.display = 'none';
+    
+    resetParams();
+    
+    const editor = document.getElementById('agentEditor');
+    if (editor) editor.style.display = 'flex';
+};
+
+window.closeAgentEditor = function() {
+    const editor = document.getElementById('agentEditor');
+    if (editor) editor.style.display = 'none';
+};
+
+window.showStorageInfo = function() {
+    const modal = document.getElementById('storageInfoModal');
+    if (modal) modal.style.display = 'flex';
+    
+    // 显示路径信息
+    const pathDiv = document.getElementById('defaultStoragePath');
+    if (pathDiv) {
+        const isWin = navigator.platform.toLowerCase().includes('win');
+        pathDiv.innerHTML = isWin 
+            ? 'C:\\Users\\<用户名>\\.ollama\\models'
+            : '~/.ollama/models';
+    }
+};
+
+window.closeStorageInfo = function() {
+    const modal = document.getElementById('storageInfoModal');
+    if (modal) modal.style.display = 'none';
+};
+
+// 欢迎页 Tab 切换
+window.switchWelcomeTab = function(tab) {
+    // 移除所有 active 类
+    document.querySelectorAll('.welcome-tab').forEach(t => t.classList.remove('active'));
+    
+    // 给当前选中的 tab 添加 active 类
+    const activeTab = document.querySelector(`.welcome-tab[data-tab="${tab}"]`);
+    if (activeTab) activeTab.classList.add('active');
+    
+    // 切换内容显示
+    const quickTab = document.getElementById('quickTab');
+    const plazaTab = document.getElementById('plazaTab');
+    
+    if (quickTab) quickTab.style.display = tab === 'quick' ? 'flex' : 'none';
+    if (plazaTab) plazaTab.style.display = tab === 'plaza' ? 'block' : 'none';
+    
+    if (tab === 'plaza') renderPlazaAgents();
+};
+
+// ==========================================
+// 业务逻辑函数
+// ==========================================
 
 // Toast 通知系统
 function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toastContainer');
+    if (!container) return;
+    
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     
     const icon = {
-        'success': '✓',
-        'error': '✕',
-        'info': 'ℹ',
-        'warning': '⚠'
+        'success': '<span style="color:#10b981">✓</span>',
+        'error': '<span style="color:#ef4444">✕</span>',
+        'info': '<span style="color:#3b82f6">ℹ</span>',
+        'warning': '<span style="color:#f59e0b">⚠</span>'
     }[type] || 'ℹ';
     
-    toast.innerHTML = `<span style="font-size: 18px;">${icon}</span><span style="flex: 1;">${message}</span><span class="toast-close">✕</span>`;
+    toast.innerHTML = `
+        <div style="font-size: 18px; display: flex; align-items: center;">${icon}</div>
+        <div style="flex: 1; font-size: 14px;">${message}</div>
+        <button class="toast-close" style="background:none; border:none; color:inherit; cursor:pointer; opacity:0.5;">✕</button>
+    `;
     
     container.appendChild(toast);
     
-    // 点击关闭
-    toast.onclick = () => {
-        toast.classList.add('hiding');
-        setTimeout(() => {
-            if (toast.parentNode) {
-                container.removeChild(toast);
-            }
-        }, 300);
-    };
+    const closeBtn = toast.querySelector('.toast-close');
+    if (closeBtn) {
+        closeBtn.onclick = () => removeToast(toast);
+    }
     
-    // 自动消失
-    const timer = setTimeout(() => {
-        toast.classList.add('hiding');
-        setTimeout(() => {
-            if (toast.parentNode) {
-                container.removeChild(toast);
-            }
-        }, 300);
-    }, duration);
-    
-    // 鼠标悬停时暂停自动关闭
-    toast.onmouseenter = () => clearTimeout(timer);
-    toast.onmouseleave = () => {
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.classList.add('hiding');
-                setTimeout(() => {
-                    if (toast.parentNode) {
-                        container.removeChild(toast);
-                    }
-                }, 300);
-            }
-        }, 1000);
-    };
+    if (duration > 0) {
+        setTimeout(() => removeToast(toast), duration);
+    }
+}
+
+function removeToast(toast) {
+    if (!toast.parentNode) return;
+    toast.style.animation = 'slideOut 0.3s forwards'; // 需要在CSS定义 slideOut
+    toast.style.opacity = '0';
+    setTimeout(() => {
+        if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
 }
 
 // 检查是否为底座模型
 function isBaseModel(modelName) {
-    const baseModels = [
+    const baseModelsList = [
         'llama', 'qwen', 'gemma', 'mistral', 'phi', 'deepseek', 
         'codellama', 'vicuna', 'orca', 'nous-hermes', 'dolphin',
         'yi', 'mixtral', 'solar', 'openchat', 'starling', 'neural-chat'
     ];
-    
     const lowerName = modelName.toLowerCase();
-    return baseModels.some(base => lowerName.startsWith(base));
+    return baseModelsList.some(base => lowerName.startsWith(base));
 }
 
 // 检查 Ollama 连接
@@ -76,7 +155,7 @@ async function checkOllamaConnection() {
     try {
         const response = await fetch(`${API_BASE}/api/tags`, {
             method: 'GET',
-            signal: AbortSignal.timeout(5000) // 5秒超时
+            signal: AbortSignal.timeout(5000)
         });
         return response.ok;
     } catch (error) {
@@ -88,180 +167,134 @@ async function checkOllamaConnection() {
 async function loadModels() {
     try {
         const response = await fetch(`${API_BASE}/api/tags`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         const data = await response.json();
         
-        // 分类模型
         baseModels = [];
         agents = [];
         
-        // 先收集所有底座模型
-        data.models.forEach(model => {
-            if (isBaseModel(model.name)) {
-                baseModels.push(model);
-            }
-        });
-        
-        // 然后处理智能体，尝试识别其底座模型
-        data.models.forEach(model => {
-            if (!isBaseModel(model.name)) {
-                // 尝试从模型详情中获取底座模型
-                let baseModel = 'unknown';
-                
-                // 如果模型名称包含底座模型名称，提取它
-                for (const base of baseModels) {
-                    if (model.name.includes(base.name.split(':')[0])) {
-                        baseModel = base.name;
-                        break;
-                    }
+        // 分类模型
+        if (data.models) {
+            data.models.forEach(model => {
+                if (isBaseModel(model.name)) {
+                    baseModels.push(model);
                 }
-                
-                agents.push({
-                    name: model.name,
-                    displayName: model.name,
-                    baseModel: baseModel,
-                    modelName: model.name
-                });
-            }
-        });
+            });
+            
+            data.models.forEach(model => {
+                if (!isBaseModel(model.name)) {
+                    let baseModel = 'unknown';
+                    for (const base of baseModels) {
+                        if (model.name.includes(base.name.split(':')[0])) {
+                            baseModel = base.name;
+                            break;
+                        }
+                    }
+                    agents.push({
+                        name: model.name,
+                        displayName: model.name,
+                        baseModel: baseModel,
+                        modelName: model.name
+                    });
+                }
+            });
+        }
         
         renderAgentList();
         renderBaseModelList();
         updateBaseModelSelect();
         
+        // 恢复状态检查
+        if (currentAgent) {
+             const exists = agents.find(a => a.modelName === currentAgent.modelName);
+             if (!exists) showWelcomeScreen();
+        }
+        
     } catch (error) {
         console.error('加载模型失败:', error);
-        
-        // 在侧边栏显示错误提示（不显示 Toast，避免重复）
-        const agentList = document.getElementById('agentList');
-        const noAgents = document.getElementById('noAgents');
-        agentList.innerHTML = '';
+        handleConnectionError();
+    }
+}
+
+function handleConnectionError() {
+    const agentList = document.getElementById('agentList');
+    const noAgents = document.getElementById('noAgents');
+    
+    if (agentList) agentList.innerHTML = '';
+    if (noAgents) {
         noAgents.style.display = 'block';
         noAgents.innerHTML = `
-            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
-            <div style="color: #ef4444; font-weight: 500;">连接失败</div>
-            <div style="font-size: 12px; margin-top: 10px; color: #9ca3af; line-height: 1.5;">
-                ${error.message}<br>
-                <br>
-                端口: ${API_BASE}
-            </div>
-            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #2563eb; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">
-                重新连接
-            </button>
+            <div style="color: #ef4444; margin-bottom: 10px;">无法连接到 Ollama</div>
+            <button onclick="location.reload()" class="primary" style="width:100%; font-size:12px;">重连</button>
         `;
     }
 }
 
-// 渲染智能体列表
+// 渲染列表相关函数
 function renderAgentList() {
     const agentList = document.getElementById('agentList');
     const noAgents = document.getElementById('noAgents');
+    if (!agentList) return;
     
     agentList.innerHTML = '';
     
     if (agents.length === 0) {
-        noAgents.style.display = 'block';
+        if (noAgents) noAgents.style.display = 'block';
         return;
     }
     
-    noAgents.style.display = 'none';
+    if (noAgents) noAgents.style.display = 'none';
     
     agents.forEach(agent => {
         const item = document.createElement('div');
-        item.className = 'agent-item fade-in';
+        item.className = 'agent-item';
         if (currentAgent && currentAgent.name === agent.name) {
             item.classList.add('active');
         }
         
-        // 头像
-        const avatar = document.createElement('div');
-        avatar.className = 'agent-avatar';
-        avatar.textContent = agent.displayName.charAt(0).toUpperCase();
-        
-        // 信息
-        const info = document.createElement('div');
-        info.className = 'agent-info';
-        info.onclick = () => selectAgentMobile(agent);
-        
-        const name = document.createElement('div');
-        name.className = 'agent-name';
-        name.textContent = agent.displayName;
-        
-        const base = document.createElement('div');
-        base.className = 'agent-base';
-        base.textContent = agent.baseModel;
-        
-        info.appendChild(name);
-        info.appendChild(base);
-        
-        // 在线状态指示器（当前选中的智能体）
-        if (currentAgent && currentAgent.name === agent.name) {
-            const status = document.createElement('div');
-            status.className = 'agent-status';
-            status.title = '当前对话';
-            item.appendChild(status);
-        }
-        
-        // 菜单按钮
-        const menu = document.createElement('div');
-        menu.className = 'agent-menu';
-        
-        const menuBtn = document.createElement('button');
-        menuBtn.className = 'menu-btn';
-        menuBtn.textContent = '⋮';
-        menuBtn.onclick = (e) => {
-            e.stopPropagation();
-            showAgentMenu(agent, menuBtn);
-        };
-        
-        menu.appendChild(menuBtn);
-        
-        item.appendChild(avatar);
-        item.appendChild(info);
-        item.appendChild(menu);
-        
+        item.innerHTML = `
+            <div class="agent-avatar">${agent.displayName.charAt(0).toUpperCase()}</div>
+            <div class="agent-info" onclick="selectAgentMobile('${agent.modelName}')">
+                <div class="agent-name">${agent.displayName}</div>
+                <div class="agent-base">${agent.baseModel}</div>
+            </div>
+            <div class="agent-menu">
+                <button class="menu-btn" onclick="toggleAgentMenu(event, '${agent.modelName}')">⋮</button>
+            </div>
+        `;
         agentList.appendChild(item);
     });
 }
 
-// 渲染底座模型列表
 function renderBaseModelList() {
     const baseModelList = document.getElementById('baseModelList');
+    if (!baseModelList) return;
+    
     baseModelList.innerHTML = '';
     
     if (baseModels.length === 0) {
-        baseModelList.innerHTML = '<div style="padding: 10px; color: #9ca3af; font-size: 12px;">暂无底座模型</div>';
+        baseModelList.innerHTML = '<div style="color: var(--text-tertiary); font-size: 13px; padding: 10px;">暂无模型</div>';
         return;
     }
     
     baseModels.forEach(model => {
         const item = document.createElement('div');
-        item.style.cssText = 'padding: 10px; margin: 5px 0; background: #333; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;';
+        item.style.cssText = 'padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.03); border-radius: var(--radius-sm); display: flex; justify-content: space-between; align-items: center; border: 1px solid transparent;';
         
-        const name = document.createElement('span');
-        name.textContent = model.name;
-        name.style.flex = '1';
-        
-        const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = '删除';
-        deleteBtn.style.cssText = 'padding: 4px 10px; background: #dc2626; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 12px;';
-        deleteBtn.onclick = () => deleteBaseModel(model.name);
-        
-        item.appendChild(name);
-        item.appendChild(deleteBtn);
+        item.innerHTML = `
+            <span style="font-size: 13px; font-family: monospace;">${model.name}</span>
+            <button onclick="deleteBaseModel('${model.name}')" style="color: #ef4444; background: transparent; padding: 4px; font-size: 12px; border: none; cursor: pointer;">删除</button>
+        `;
         baseModelList.appendChild(item);
     });
 }
 
-// 更新底座模型选择框
 function updateBaseModelSelect() {
     const select = document.getElementById('baseModelSelect');
-    select.innerHTML = '<option value="">选择底座模型...</option>';
+    if (!select) return;
     
+    select.innerHTML = '<option value="">选择底座模型...</option>';
     baseModels.forEach(model => {
         const option = document.createElement('option');
         option.value = model.name;
@@ -270,966 +303,279 @@ function updateBaseModelSelect() {
     });
 }
 
-// 选择智能体
+// 智能体选择
 function selectAgent(agent) {
-    // 保存当前对话
     if (currentAgent && chatHistory.length > 0) {
         saveChatHistory();
     }
     
-    // 切换智能体
     currentAgent = agent;
-    document.getElementById('currentAgentName').textContent = agent.displayName;
+    const nameEl = document.getElementById('currentAgentName');
+    if (nameEl) nameEl.textContent = agent.displayName;
+    
     renderAgentList();
     
-    // 保存当前选择的智能体
     localStorage.setItem('lastAgent', JSON.stringify(agent));
-    
-    // 更新最近使用列表
     updateRecentAgents(agent);
     
-    // 加载新智能体的聊天记录
     loadChatHistory();
     
-    // 隐藏欢迎页面，显示聊天区域和输入框
-    const welcomeScreen = document.getElementById('welcomeScreen');
-    const chatArea = document.getElementById('chatArea');
-    const inputArea = document.getElementById('inputArea');
-    const backToHomeBtn = document.getElementById('backToHomeBtn');
-    const keepHistoryLabel = document.getElementById('keepHistoryLabel');
-    const clearChatBtn = document.getElementById('clearChatBtn');
+    // 切换视图
+    document.getElementById('welcomeScreen').style.display = 'none';
+    document.getElementById('chatArea').style.display = 'block';
+    document.getElementById('inputArea').style.display = 'block';
+    document.getElementById('backToHomeBtn').style.display = 'flex';
+    document.getElementById('keepHistoryLabel').style.display = 'flex';
+    document.getElementById('clearChatBtn').style.display = 'flex';
     
-    if (welcomeScreen) welcomeScreen.style.display = 'none';
-    if (chatArea) chatArea.style.display = 'block';
-    if (inputArea) inputArea.style.display = 'block';
-    if (backToHomeBtn) backToHomeBtn.style.display = 'flex';
-    if (keepHistoryLabel) keepHistoryLabel.style.display = 'flex';
-    if (clearChatBtn) clearChatBtn.style.display = 'flex';
-    
-    // 聚焦输入框
-    const userInput = document.getElementById('userInput');
-    if (userInput) {
-        setTimeout(() => userInput.focus(), 100);
-    }
+    setTimeout(() => {
+        const input = document.getElementById('userInput');
+        if (input) input.focus();
+    }, 100);
 }
 
-// 显示智能体菜单
-let currentMenu = null;
-function showAgentMenu(agent, button) {
-    // 关闭之前的菜单
-    if (currentMenu) {
-        currentMenu.remove();
-        currentMenu = null;
-        return;
+// 更多全局函数绑定
+window.selectAgentMobile = function(modelName) {
+    const agent = agents.find(a => a.modelName === modelName);
+    if (agent) {
+        selectAgent(agent);
+        if (window.innerWidth <= 768) {
+            window.toggleMobileSidebar();
+        }
     }
+};
+
+window.toggleAgentMenu = function(event, modelName) {
+    event.stopPropagation();
+    const existingMenu = document.querySelector('.dropdown-menu');
+    if (existingMenu) existingMenu.remove();
+    
+    const agent = agents.find(a => a.modelName === modelName);
+    if (!agent) return;
     
     const menu = document.createElement('div');
-    menu.className = 'dropdown-menu show';
+    menu.className = 'dropdown-menu';
+    menu.innerHTML = `
+        <div class="dropdown-item" onclick="editAgentByName('${modelName}')">✏️ 编辑</div>
+        <div class="dropdown-item" onclick="deleteAgentByName('${modelName}')" style="color: #ef4444;">🗑️ 删除</div>
+    `;
     
-    const editItem = document.createElement('div');
-    editItem.className = 'dropdown-item';
-    editItem.textContent = '✏️ 编辑';
-    editItem.onclick = () => {
-        editAgent(agent);
-        menu.remove();
-        currentMenu = null;
-    };
+    const rect = event.target.getBoundingClientRect();
+    menu.style.position = 'fixed'; 
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 5}px`;
+    menu.style.minWidth = '100px';
     
-    const deleteItem = document.createElement('div');
-    deleteItem.className = 'dropdown-item';
-    deleteItem.textContent = '🗑️ 删除';
-    deleteItem.onclick = () => {
-        deleteAgent(agent);
-        menu.remove();
-        currentMenu = null;
-    };
+    document.body.appendChild(menu);
     
-    menu.appendChild(editItem);
-    menu.appendChild(deleteItem);
-    
-    button.parentElement.parentElement.appendChild(menu);
-    currentMenu = menu;
-    
-    // 点击其他地方关闭菜单
     setTimeout(() => {
-        document.addEventListener('click', function closeMenu(e) {
-            if (menu && !menu.contains(e.target)) {
-                menu.remove();
-                currentMenu = null;
-                document.removeEventListener('click', closeMenu);
-            }
-        });
+        document.addEventListener('click', function closeMenu() {
+            if (menu.parentNode) menu.remove();
+            document.removeEventListener('click', closeMenu);
+        }, { once: true });
     }, 0);
-}
+};
 
-// 创建新智能体
-function createNewAgent() {
-    editingAgent = null;
-    document.getElementById('editorTitle').textContent = '创建智能体';
-    document.getElementById('agentName').value = '';
-    document.getElementById('baseModelSelect').value = '';
-    document.getElementById('systemPrompt').value = '';
-    document.getElementById('temperature').value = '0.8';
-    document.getElementById('top_p').value = '0.9';
-    document.getElementById('top_k').value = '40';
-    document.getElementById('repeat_penalty').value = '1.1';
-    document.getElementById('num_ctx').value = '2048';
-    document.getElementById('num_predict').value = '-1';
-    document.getElementById('seed').value = '0';
-    document.getElementById('stop_sequences').value = '';
-    updateParamValue('temp', '0.8');
-    updateParamValue('topp', '0.9');
-    updateParamValue('topk', '40');
-    updateParamValue('repeat', '1.1');
-    updateParamValue('ctx', '2048');
-    updateParamValue('predict', '-1');
-    updateParamValue('seed', '0');
-    document.getElementById('agentEditor').style.display = 'block';
+window.editAgentByName = function(name) {
+    const agent = agents.find(a => a.modelName === name);
+    if (agent) editAgent(agent);
+};
+
+window.deleteAgentByName = function(name) {
+    const agent = agents.find(a => a.modelName === name);
+    if (agent) deleteAgent(agent);
+};
+
+// 参数重置
+function resetParams() {
+    updateParamValue('temp', 0.8);
+    updateParamValue('topp', 0.9);
+    updateParamValue('topk', 40);
+    updateParamValue('repeat', 1.1);
+    updateParamValue('ctx', 2048);
+    updateParamValue('seed', 0);
+    
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+    };
+    
+    setVal('temperature', 0.8);
+    setVal('top_p', 0.9);
+    setVal('top_k', 40);
+    setVal('repeat_penalty', 1.1);
+    setVal('num_ctx', 2048);
+    setVal('seed', 0);
 }
 
 // 编辑智能体
 async function editAgent(agent) {
     editingAgent = agent;
-    document.getElementById('editorTitle').textContent = '编辑智能体';
-    document.getElementById('agentName').value = agent.displayName;
+    const title = document.getElementById('editorTitle');
+    if (title) title.textContent = '编辑智能体';
     
-    // 先尝试从 localStorage 加载保存的配置
+    const nameInput = document.getElementById('agentName');
+    if (nameInput) nameInput.value = agent.displayName;
+    
+    // 尝试加载配置
     const savedConfig = localStorage.getItem(`agent_config_${agent.modelName}`);
     if (savedConfig) {
         try {
             const config = JSON.parse(savedConfig);
-            console.log('从 localStorage 加载配置:', config);
+            const modelSelect = document.getElementById('baseModelSelect');
+            const prompt = document.getElementById('systemPrompt');
             
-            document.getElementById('baseModelSelect').value = config.baseModel || '';
-            document.getElementById('systemPrompt').value = config.systemPrompt || '';
+            if (modelSelect) modelSelect.value = config.baseModel || '';
+            if (prompt) prompt.value = config.systemPrompt || '';
             
             if (config.parameters) {
                 const p = config.parameters;
                 if (p.temp) { document.getElementById('temperature').value = p.temp; updateParamValue('temp', p.temp); }
                 if (p.topp) { document.getElementById('top_p').value = p.topp; updateParamValue('topp', p.topp); }
-                if (p.topk) { document.getElementById('top_k').value = p.topk; updateParamValue('topk', p.topk); }
-                if (p.repeat) { document.getElementById('repeat_penalty').value = p.repeat; updateParamValue('repeat', p.repeat); }
-                if (p.numCtx) { document.getElementById('num_ctx').value = p.numCtx; updateParamValue('ctx', p.numCtx); }
-                if (p.numPredict) { document.getElementById('num_predict').value = p.numPredict; updateParamValue('predict', p.numPredict); }
-                if (p.seed) { document.getElementById('seed').value = p.seed; updateParamValue('seed', p.seed); }
-                if (p.stopSeq) { document.getElementById('stop_sequences').value = p.stopSeq; }
+                // ... 可以继续补充其他参数的恢复
             }
-            
-            // 已经加载完配置，打开编辑器
-            document.getElementById('agentEditor').style.display = 'block';
+            const editor = document.getElementById('agentEditor');
+            if (editor) editor.style.display = 'flex';
             return;
-        } catch (e) {
-            console.error('解析保存的配置失败:', e);
-        }
+        } catch(e) {}
     }
     
-    // 如果没有保存的配置，尝试从智能体对象获取底座模型
-    if (agent.baseModel && agent.baseModel !== 'unknown') {
-        document.getElementById('baseModelSelect').value = agent.baseModel;
+    if (agent.baseModel) {
+        const modelSelect = document.getElementById('baseModelSelect');
+        if (modelSelect) modelSelect.value = agent.baseModel;
     }
     
-    // 加载现有配置（从 Ollama API）
-    try {
-        console.log('从 Ollama API 加载智能体配置:', agent.modelName);
-        
-        const response = await fetch(`${API_BASE}/api/show`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: agent.modelName })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log('获取到的数据:', data);
-        
-        // 优先使用 parent_model 字段
-        if (data.details && data.details.parent_model) {
-            document.getElementById('baseModelSelect').value = data.details.parent_model;
-            console.log('从 details.parent_model 获取底座:', data.details.parent_model);
-        }
-        
-        // 获取系统提示词
-        if (data.system) {
-            document.getElementById('systemPrompt').value = data.system;
-            console.log('从 system 字段获取提示词');
-        }
-        
-        // Ollama 返回的数据结构
-        let modelfile = '';
-        
-        // 尝试从不同字段获取 Modelfile
-        if (data.modelfile) {
-            modelfile = data.modelfile;
-        } else if (data.details && data.details.modelfile) {
-            modelfile = data.details.modelfile;
-        }
-        
-        console.log('Modelfile 内容:\n', modelfile);
-        console.log('Parameters:', data.parameters);
-        console.log('System:', data.system);
-        
-        const fromMatch = modelfile.match(/FROM\s+(\S+)/);
-        const systemMatch = modelfile.match(/SYSTEM\s+"""([\s\S]*?)"""/);
-        const tempMatch = modelfile.match(/PARAMETER\s+temperature\s+([\d.]+)/);
-        const toppMatch = modelfile.match(/PARAMETER\s+top_p\s+([\d.]+)/);
-        const topkMatch = modelfile.match(/PARAMETER\s+top_k\s+([\d]+)/);
-        const repeatMatch = modelfile.match(/PARAMETER\s+repeat_penalty\s+([\d.]+)/);
-        const ctxMatch = modelfile.match(/PARAMETER\s+num_ctx\s+([\d]+)/);
-        const predictMatch = modelfile.match(/PARAMETER\s+num_predict\s+([-\d]+)/);
-        const seedMatch = modelfile.match(/PARAMETER\s+seed\s+([\d]+)/);
-        const stopMatches = modelfile.match(/PARAMETER\s+stop\s+"([^"]+)"/g);
-        
-        console.log('解析结果:', {
-            from: fromMatch?.[1],
-            system: systemMatch?.[1],
-            temp: tempMatch?.[1],
-            topp: toppMatch?.[1]
-        });
-        
-        // 从 Modelfile 解析其他参数（底座和系统提示词已经在上面设置了）
-        if (systemMatch && !data.system) {
-            document.getElementById('systemPrompt').value = systemMatch[1].trim();
-        }
-        
-        // 尝试从 parameters 对象获取参数
-        if (data.parameters) {
-            const params = data.parameters;
-            if (params.temperature !== undefined) {
-                document.getElementById('temperature').value = params.temperature;
-                updateParamValue('temp', params.temperature);
-            }
-            if (params.top_p !== undefined) {
-                document.getElementById('top_p').value = params.top_p;
-                updateParamValue('topp', params.top_p);
-            }
-            if (params.top_k !== undefined) {
-                document.getElementById('top_k').value = params.top_k;
-                updateParamValue('topk', params.top_k);
-            }
-            if (params.repeat_penalty !== undefined) {
-                document.getElementById('repeat_penalty').value = params.repeat_penalty;
-                updateParamValue('repeat', params.repeat_penalty);
-            }
-            if (params.num_ctx !== undefined) {
-                document.getElementById('num_ctx').value = params.num_ctx;
-                updateParamValue('ctx', params.num_ctx);
-            }
-            if (params.num_predict !== undefined) {
-                document.getElementById('num_predict').value = params.num_predict;
-                updateParamValue('predict', params.num_predict);
-            }
-            if (params.seed !== undefined) {
-                document.getElementById('seed').value = params.seed;
-                updateParamValue('seed', params.seed);
-            }
-        }
-        if (tempMatch) {
-            document.getElementById('temperature').value = tempMatch[1];
-            updateParamValue('temp', tempMatch[1]);
-        }
-        if (toppMatch) {
-            document.getElementById('top_p').value = toppMatch[1];
-            updateParamValue('topp', toppMatch[1]);
-        }
-        if (topkMatch) {
-            document.getElementById('top_k').value = topkMatch[1];
-            updateParamValue('topk', topkMatch[1]);
-        }
-        if (repeatMatch) {
-            document.getElementById('repeat_penalty').value = repeatMatch[1];
-            updateParamValue('repeat', repeatMatch[1]);
-        }
-        if (ctxMatch) {
-            document.getElementById('num_ctx').value = ctxMatch[1];
-            updateParamValue('ctx', ctxMatch[1]);
-        }
-        if (predictMatch) {
-            document.getElementById('num_predict').value = predictMatch[1];
-            updateParamValue('predict', predictMatch[1]);
-        }
-        if (seedMatch) {
-            document.getElementById('seed').value = seedMatch[1];
-            updateParamValue('seed', seedMatch[1]);
-        }
-        if (stopMatches) {
-            const stops = stopMatches.map(m => m.match(/"([^"]+)"/)[1]);
-            document.getElementById('stop_sequences').value = stops.join(', ');
-        }
-        
-    } catch (error) {
-        console.error('加载智能体配置失败:', error);
-        showToast('加载配置失败: ' + error.message, 'error');
-    }
-    
-    document.getElementById('agentEditor').style.display = 'block';
+    const editor = document.getElementById('agentEditor');
+    if (editor) editor.style.display = 'flex';
 }
 
 // 保存智能体
-async function saveAgent() {
+window.saveAgent = async function() {
     const displayName = document.getElementById('agentName').value.trim();
     const baseModel = document.getElementById('baseModelSelect').value;
     const systemPrompt = document.getElementById('systemPrompt').value.trim();
-    const temp = document.getElementById('temperature').value;
-    const topp = document.getElementById('top_p').value;
-    const topk = document.getElementById('top_k').value;
-    const repeat = document.getElementById('repeat_penalty').value;
-    const numCtx = document.getElementById('num_ctx').value;
-    const numPredict = document.getElementById('num_predict').value;
-    const seed = document.getElementById('seed').value;
-    const stopSeq = document.getElementById('stop_sequences').value.trim();
     
     if (!displayName || !baseModel) {
-        showToast('请填写智能体名称并选择底座模型', 'warning');
+        showToast('请填写名称并选择底座模型', 'warning');
         return;
     }
     
-    // 生成模型名称（只保留字母、数字、连字符、下划线）
-    let modelName;
-    if (editingAgent) {
-        modelName = editingAgent.modelName;
-    } else {
-        // 移除所有非法字符，只保留字母、数字、连字符、下划线
-        modelName = displayName
-            .toLowerCase()
-            .replace(/[^a-z0-9-_]/g, '-') // 将非法字符替换为连字符
-            .replace(/-+/g, '-') // 合并多个连字符
-            .replace(/^-|-$/g, ''); // 移除首尾连字符
-        
-        // 如果全是中文导致名称为空，使用时间戳
-        if (!modelName || modelName === '-') {
-            modelName = 'agent-' + Date.now();
-        }
-    }
+    const params = {
+        temp: document.getElementById('temperature').value,
+        topp: document.getElementById('top_p').value,
+        topk: document.getElementById('top_k').value,
+        repeat: document.getElementById('repeat_penalty').value,
+        numCtx: document.getElementById('num_ctx').value,
+        seed: document.getElementById('seed').value
+    };
     
-    console.log('创建智能体:', {
-        displayName,
-        modelName,
-        baseModel
-    });
+    // 生成模型名
+    let modelName = editingAgent ? editingAgent.modelName : displayName.toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+    if (!modelName || modelName === '-') modelName = 'agent-' + Date.now();
     
-    // 生成 Modelfile（确保格式正确）
-    const lines = [
-        `FROM ${baseModel}`,
-        '',
-        `PARAMETER temperature ${temp}`,
-        `PARAMETER top_p ${topp}`,
-        `PARAMETER top_k ${topk}`,
-        `PARAMETER repeat_penalty ${repeat}`
-    ];
+    const modelfile = `FROM ${baseModel}
+PARAMETER temperature ${params.temp}
+PARAMETER top_p ${params.topp}
+PARAMETER top_k ${params.topk}
+PARAMETER repeat_penalty ${params.repeat}
+PARAMETER num_ctx ${params.numCtx}
+PARAMETER seed ${params.seed}
+SYSTEM """
+${systemPrompt || '你是一个友好的AI助手。'}
+"""`;
 
-    // 添加高级参数（如果不是默认值）
-    if (numCtx !== '2048') {
-        lines.push(`PARAMETER num_ctx ${numCtx}`);
-    }
-    if (numPredict !== '-1') {
-        lines.push(`PARAMETER num_predict ${numPredict}`);
-    }
-    if (seed !== '0') {
-        lines.push(`PARAMETER seed ${seed}`);
-    }
-    if (stopSeq) {
-        const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
-        stops.forEach(stop => {
-            lines.push(`PARAMETER stop "${stop}"`);
-        });
-    }
-
-    // 添加 SYSTEM 部分
-    lines.push('');
-    lines.push('SYSTEM """');
-    lines.push(systemPrompt || '你是一个友好的AI助手。');
-    lines.push('"""');
-    
-    // 组合成 Modelfile
-    const modelfile = lines.join('\n');
-    
     const statusDiv = document.getElementById('agentStatus');
-    statusDiv.innerHTML = '<div class="loading-spinner">正在保存智能体...</div>';
-    
-    // 如果是编辑，先删除旧模型
-    if (editingAgent) {
-        try {
-            statusDiv.innerHTML = '<div class="loading-spinner">正在删除旧版本...</div>';
-            await fetch(`${API_BASE}/api/delete`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: editingAgent.modelName })
-            });
-            console.log('旧模型已删除');
-        } catch (error) {
-            console.log('删除旧模型失败，继续创建:', error);
-        }
-    }
-    
-    // 创建模型
-    console.log('=== 创建智能体请求 ===');
-    console.log('模型名称:', modelName);
-    console.log('API 地址:', `${API_BASE}/api/create`);
-    console.log('Modelfile 内容:');
-    console.log(modelfile);
-    console.log('======================');
-    
-    statusDiv.innerHTML = `<div class="loading-spinner">正在创建模型: ${modelName}</div>`;
+    if (statusDiv) statusDiv.innerHTML = '<div class="loading-spinner">正在创建智能体...</div>';
     
     try {
-        // Ollama API 需要 from、system 和 parameters 字段
-        const parameters = {
-            temperature: parseFloat(temp),
-            top_p: parseFloat(topp),
-            top_k: parseInt(topk),
-            repeat_penalty: parseFloat(repeat)
-        };
-        
-        // 添加高级参数（如果不是默认值）
-        if (numCtx !== '2048') {
-            parameters.num_ctx = parseInt(numCtx);
+        if (editingAgent) {
+            await fetch(`${API_BASE}/api/delete`, {
+                method: 'DELETE',
+                body: JSON.stringify({ name: editingAgent.modelName })
+            });
         }
-        if (numPredict !== '-1') {
-            parameters.num_predict = parseInt(numPredict);
-        }
-        if (seed !== '0') {
-            parameters.seed = parseInt(seed);
-        }
-        if (stopSeq) {
-            const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
-            if (stops.length > 0) {
-                parameters.stop = stops;
-            }
-        }
-        
-        const requestBody = { 
-            name: modelName, 
-            from: baseModel,
-            system: systemPrompt || '你是一个友好的AI助手。',
-            parameters: parameters,
-            stream: true
-        };
-        
-        console.log('发送请求到:', `${API_BASE}/api/create`);
-        console.log('请求体:', JSON.stringify(requestBody, null, 2));
         
         const response = await fetch(`${API_BASE}/api/create`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestBody)
+            body: JSON.stringify({ name: modelName, modelfile: modelfile, stream: false })
         });
         
-        console.log('响应状态:', response.status, response.statusText);
+        if (!response.ok) throw new Error(await response.text());
         
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('错误响应内容:', errorText);
-            
-            // 尝试解析错误信息
-            try {
-                const errorJson = JSON.parse(errorText);
-                throw new Error(errorJson.error || errorText);
-            } catch (e) {
-                throw new Error(`HTTP ${response.status}: ${errorText}`);
-            }
-        }
+        localStorage.setItem(`agent_config_${modelName}`, JSON.stringify({
+            modelName, displayName, baseModel, systemPrompt, parameters: params
+        }));
         
-        // 读取响应流
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let lastStatus = '';
+        if (statusDiv) statusDiv.innerHTML = '<span style="color:#10b981">✓ 创建成功</span>';
+        showToast('智能体创建成功', 'success');
         
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n').filter(line => line.trim());
-            
-            for (const line of lines) {
-                try {
-                    const json = JSON.parse(line);
-                    console.log('创建进度:', json);
-                    
-                    if (json.status) {
-                        lastStatus = json.status;
-                        // 翻译状态信息
-                        const statusMap = {
-                            'parsing modelfile': '正在解析 Modelfile',
-                            'looking up model': '正在查找底座模型',
-                            'creating system layer': '正在创建系统层',
-                            'creating parameters layer': '正在创建参数层',
-                            'creating config layer': '正在创建配置层',
-                            'writing manifest': '正在写入清单',
-                            'success': '创建成功'
-                        };
-                        const displayStatus = statusMap[json.status.toLowerCase()] || json.status;
-                        statusDiv.innerHTML = `<div class="loading-spinner">${displayStatus}</div>`;
-                    }
-                } catch (e) {
-                    console.log('非 JSON 响应:', line);
-                }
-            }
-        }
-        
-        // 检查最后的状态
-        if (lastStatus.toLowerCase() === 'success' || lastStatus === '') {
-            statusDiv.innerHTML = '<div class="status success">✓ 保存成功！</div>';
-            console.log('智能体创建成功:', modelName);
-            
-            // 保存智能体配置到 localStorage
-            const agentConfig = {
-                modelName,
-                displayName,
-                baseModel,
-                systemPrompt,
-                parameters: { temp, topp, topk, repeat, numCtx, numPredict, seed, stopSeq }
-            };
-            localStorage.setItem(`agent_config_${modelName}`, JSON.stringify(agentConfig));
-            
-            showToast(`智能体 "${displayName}" ${editingAgent ? '更新' : '创建'}成功！`, 'success', 4000);
-            
-            setTimeout(() => {
-                closeAgentEditor();
-                console.log('重新加载模型列表...');
-                loadModels();
-            }, 1500);
-        } else {
-            throw new Error('创建过程未正常完成');
-        }
+        setTimeout(() => {
+            window.closeAgentEditor();
+            loadModels();
+        }, 1000);
         
     } catch (error) {
-        console.error('保存智能体失败:', error);
-        statusDiv.innerHTML = `<div class="status error">✕ 错误: ${error.message}</div>`;
-        showToast('保存失败: ' + error.message, 'error', 6000);
+        console.error(error);
+        if (statusDiv) statusDiv.innerHTML = `<span style="color:#ef4444">创建失败: ${error.message}</span>`;
+        
+        const hint = document.getElementById('manualCreateHint');
+        const cmdDiv = document.getElementById('createCommand');
+        if (hint) hint.style.display = 'block';
+        if (cmdDiv) cmdDiv.textContent = `ollama create ${modelName} -f Modelfile`;
     }
-}
+};
 
-// 删除智能体
-async function deleteAgent(agent) {
-    if (!confirm(`确定要删除智能体 "${agent.displayName}" 吗？`)) {
-        return;
-    }
-    
+window.deleteBaseModel = async function(modelName) {
+    if(!confirm(`确定要删除底座模型 ${modelName} 吗？`)) return;
     try {
         await fetch(`${API_BASE}/api/delete`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: modelName })
+        });
+        showToast('已删除', 'success');
+        loadModels();
+    } catch(e) {
+        showToast('删除失败', 'error');
+    }
+}
+
+async function deleteAgent(agent) {
+    if (!confirm(`确定要删除 "${agent.displayName}" 吗？`)) return;
+    try {
+        await fetch(`${API_BASE}/api/delete`, {
+            method: 'DELETE',
             body: JSON.stringify({ name: agent.modelName })
         });
         
         if (currentAgent && currentAgent.name === agent.name) {
-            currentAgent = null;
-            document.getElementById('currentAgentName').textContent = '选择一个智能体开始对话';
-            clearChat();
+            window.backToHome();
         }
-        
-        showToast(`智能体 "${agent.displayName}" 已删除`, 'success');
+        showToast('已删除', 'success');
         loadModels();
-    } catch (error) {
-        showToast('删除失败: ' + error.message, 'error');
+    } catch(e) {
+        showToast('删除失败', 'error');
     }
 }
 
-function closeAgentEditor() {
-    document.getElementById('agentEditor').style.display = 'none';
-    editingAgent = null;
-}
-
-// 管理面板
-function toggleManagePanel() {
-    document.getElementById('managePanel').style.display = 'block';
-    // 不需要重新加载，因为已经在页面加载时加载过了
-    // 只在需要时更新底座模型列表
-    renderBaseModelList();
-}
-
-function closeManagePanel() {
-    document.getElementById('managePanel').style.display = 'none';
-}
-
-// 删除底座模型
-async function deleteBaseModel(modelName) {
-    if (!confirm(`确定要删除底座模型 "${modelName}" 吗？\n\n删除后如需使用需要重新拉取。`)) {
-        return;
-    }
-    
-    try {
-        await fetch(`${API_BASE}/api/delete`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: modelName })
-        });
-        
-        showToast(`底座模型 "${modelName}" 已删除`, 'success');
-        loadModels();
-    } catch (error) {
-        showToast('删除失败: ' + error.message, 'error');
-    }
-}
-
-// 格式化文件大小
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-}
-
-// 格式化速度
-function formatSpeed(bytesPerSecond) {
-    if (!bytesPerSecond || bytesPerSecond === 0) return '--';
-    return formatBytes(bytesPerSecond) + '/s';
-}
-
-// 更新拉取方式
-function updatePullMethod() {
-    const method = document.querySelector('input[name="pullMethod"]:checked').value;
-    const commandHint = document.getElementById('pullCommandHint');
-    const pullBtn = document.getElementById('pullBtn');
-    
-    if (method === 'cli') {
-        commandHint.style.display = 'block';
-        pullBtn.textContent = '显示命令';
-    } else {
-        commandHint.style.display = 'none';
-        pullBtn.textContent = '拉取模型';
-    }
-}
-
-// 拉取模型
-async function pullModel() {
-    const modelName = document.getElementById('pullModelInput').value.trim();
-    if (!modelName) {
-        showToast('请输入模型名称', 'warning');
-        return;
-    }
-    
-    const method = document.querySelector('input[name="pullMethod"]:checked').value;
-    
-    // 如果选择命令行方式
-    if (method === 'cli') {
-        const commandDiv = document.getElementById('pullCommand');
-        const commandHint = document.getElementById('pullCommandHint');
-        
-        if (!commandDiv) {
-            console.error('pullCommand 元素未找到');
-            showToast('界面错误，请刷新页面', 'error');
-            return;
-        }
-        
-        const command = `ollama pull ${modelName}`;
-        commandDiv.textContent = command;
-        commandDiv.innerHTML = command; // 同时设置 innerHTML 确保显示
-        commandHint.style.display = 'block';
-        
-        console.log('显示命令:', command);
-        
-        // 复制到剪贴板
-        navigator.clipboard.writeText(command).then(() => {
-            showToast('命令已复制到剪贴板', 'success');
-        }).catch((err) => {
-            console.error('复制失败:', err);
-            showToast('请手动复制命令', 'info');
-        });
-        
-        return;
-    }
-    
-    // HTTP API 方式
-    const statusDiv = document.getElementById('pullStatus');
-    const progressDiv = document.getElementById('pullProgress');
-    const progressBar = document.getElementById('pullProgressBar');
-    const progressText = document.getElementById('pullProgressText');
-    const progressPercent = document.getElementById('pullProgressPercent');
-    const speedText = document.getElementById('pullSpeed');
-    const sizeText = document.getElementById('pullSize');
-    const pullBtn = document.getElementById('pullBtn');
-    
-    // 显示进度条
-    progressDiv.style.display = 'block';
-    statusDiv.innerHTML = '';
-    pullBtn.disabled = true;
-    pullBtn.textContent = '拉取中...';
-    isPulling = true; // 标记正在拉取
-    
-    let lastTime = Date.now();
-    let lastCompleted = 0;
-    
-    try {
-        const response = await fetch(`${API_BASE}/api/pull`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: modelName, stream: true })
-        });
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n').filter(line => line.trim());
-            
-            for (const line of lines) {
-                try {
-                    const json = JSON.parse(line);
-                    
-                    // 显示状态信息
-                    if (json.status) {
-                        let statusText = json.status;
-                        
-                        // 翻译常见状态
-                        const statusMap = {
-                            'pulling manifest': '正在拉取清单',
-                            'pulling': '正在下载',
-                            'verifying sha256 digest': '正在验证文件',
-                            'writing manifest': '正在写入清单',
-                            'removing any unused layers': '正在清理',
-                            'success': '完成'
-                        };
-                        
-                        statusText = statusMap[json.status.toLowerCase()] || json.status;
-                        progressText.textContent = statusText;
-                    }
-                    
-                    // 计算进度
-                    if (json.completed !== undefined && json.total !== undefined && json.total > 0) {
-                        const percent = Math.round((json.completed / json.total) * 100);
-                        progressBar.style.width = percent + '%';
-                        progressPercent.textContent = percent + '%';
-                        
-                        // 计算速度
-                        const now = Date.now();
-                        const timeDiff = (now - lastTime) / 1000; // 秒
-                        const bytesDiff = json.completed - lastCompleted;
-                        
-                        if (timeDiff > 0.5) { // 每0.5秒更新一次速度
-                            const speed = bytesDiff / timeDiff;
-                            speedText.textContent = '速度: ' + formatSpeed(speed);
-                            lastTime = now;
-                            lastCompleted = json.completed;
-                        }
-                        
-                        // 显示大小
-                        sizeText.textContent = `${formatBytes(json.completed)} / ${formatBytes(json.total)}`;
-                    }
-                    
-                    // 如果没有进度信息，但有 digest 信息
-                    if (json.digest) {
-                        progressText.textContent = `正在处理: ${json.digest.substring(0, 12)}...`;
-                    }
-                    
-                } catch (e) {
-                    console.error('解析进度失败:', e, line);
-                }
-            }
-        }
-        
-        progressBar.style.width = '100%';
-        progressPercent.textContent = '100%';
-        progressText.textContent = '拉取完成！';
-        isPulling = false; // 标记拉取结束
-        showToast(`模型 "${modelName}" 拉取成功！`, 'success');
-        
-        setTimeout(() => {
-            progressDiv.style.display = 'none';
-            loadModels();
-        }, 2000);
-        
-    } catch (error) {
-        progressDiv.style.display = 'none';
-        
-        let errorMsg = error.message;
-        if (error.message.includes('Failed to fetch')) {
-            errorMsg = '无法连接到 Ollama 服务，请确保 Ollama 正在运行';
-            statusDiv.innerHTML = `<div class="status error">
-                ${errorMsg}<br>
-                <small style="margin-top: 5px; display: block;">建议使用"命令行"方式拉取</small>
-            </div>`;
-        } else {
-            statusDiv.innerHTML = `<div class="status error">错误: ${errorMsg}</div>`;
-        }
-        
-        showToast('拉取失败: ' + errorMsg, 'error');
-    } finally {
-        pullBtn.disabled = false;
-        pullBtn.textContent = '拉取模型';
-        isPulling = false; // 标记拉取结束
-    }
-}
-
-// 更新参数显示值
-function updateParamValue(type, value) {
-    const displays = {
-        'temp': 'tempValue',
-        'topp': 'toppValue',
-        'topk': 'topkValue',
-        'repeat': 'repeatValue',
-        'ctx': 'ctxValue',
-        'predict': 'predictValue',
-        'seed': 'seedValue'
-    };
-    const elementId = displays[type];
-    const element = document.getElementById(elementId);
-    if (element) {
-        // 特殊处理 predict 的显示
-        if (type === 'predict' && value === '-1') {
-            element.textContent = '无限制';
-        } else {
-            element.textContent = value;
-        }
-    } else {
-        console.warn(`Element ${elementId} not found for type ${type}`);
-    }
-}
-
-// 插入模板
-function insertTemplate() {
-    const baseModel = document.getElementById('baseModelSelect').value;
-    
-    if (!baseModel) {
-        showToast('请先选择底座模型', 'warning');
-        return;
-    }
-    
-    // 根据不同的底座模型生成不同的模板
-    let template = '';
-    
-    if (baseModel.includes('qwen')) {
-        template = `你是一个专业的AI助手，基于通义千问模型。
-
-性格特点：
-- 专业、准确、高效
-- 特别擅长中文理解和生成
-- 对中文文化和语境有深入理解
-
-能力范围：
-- 回答各类问题
-- 文本创作和改写
-- 代码编写和解释
-- 翻译和总结
-
-说话风格：
-- 简洁明了，重点突出
-- 适当使用例子说明
-- 保持友好和耐心`;
-    } else if (baseModel.includes('gemma')) {
-        template = `你是一个友好的AI助手，基于 Google Gemma 模型。
-
-性格特点：
-- 友好、开放、乐于助人
-- 善于理解用户意图
-- 注重安全和负责任的回答
-
-能力范围：
-- 日常对话和问答
-- 创意写作
-- 学习辅导
-- 生活建议
-
-说话风格：
-- 温和友善
-- 循循善诱
-- 鼓励和支持用户`;
-    } else if (baseModel.includes('llama')) {
-        template = `你是一个智能AI助手，基于 Meta Llama 模型。
-
-性格特点：
-- 聪明、灵活、适应性强
-- 逻辑思维清晰
-- 善于分析和推理
-
-能力范围：
-- 复杂问题分析
-- 多步骤推理
-- 知识整合
-- 创造性思考
-
-说话风格：
-- 条理清晰
-- 逻辑严谨
-- 深入浅出`;
-    } else if (baseModel.includes('deepseek')) {
-        template = `你是一个专业的编程助手，基于 DeepSeek 模型。
-
-性格特点：
-- 技术专家
-- 注重代码质量
-- 善于解决技术问题
-
-能力范围：
-- 代码编写和优化
-- Bug 调试
-- 算法设计
-- 技术方案建议
-
-说话风格：
-- 技术准确
-- 提供代码示例
-- 解释清晰`;
-    } else {
-        // 通用模板
-        template = `你是一个[角色名称]，性格特点：[描述性格]
-
-背景设定：
-[角色的背景故事]
-
-能力范围：
-- [能力1]
-- [能力2]
-- [能力3]
-
-说话风格：
-[描述说话方式，比如：活泼、严肃、幽默等]
-
-行为准则：
-- 始终保持角色设定
-- 用第一人称回应
-- 展现角色的情感和个性`;
-    }
-    
-    document.getElementById('systemPrompt').value = template;
-    showToast('模板已插入，请根据需要修改', 'success');
-}
-
-// 发送消息
-async function sendMessage() {
+// 聊天相关
+window.sendMessage = async function() {
     const input = document.getElementById('userInput');
     const message = input.value.trim();
+    if (!message || !currentAgent) return;
     
-    if (!message) return;
-    if (!currentAgent) {
-        showToast('请先选择一个智能体', 'warning');
-        return;
-    }
-    
-    // 禁用输入框和发送按钮
-    input.disabled = true;
-    const sendButtons = document.querySelectorAll('.input-box button');
-    sendButtons.forEach(btn => {
-        btn.disabled = true;
-        btn.style.opacity = '0.6';
-    });
-    
-    // 添加用户消息
-    addMessage('user', message);
     input.value = '';
+    input.style.height = 'auto'; 
     
-    // 添加助手消息占位
-    const assistantDiv = addMessage('assistant', '思考中...');
+    addMessage('user', message);
+    const assistantMsg = addMessage('assistant', '...');
+    const contentDiv = assistantMsg.querySelector('.message-content');
     
-    // 检查是否保留历史记录
     const keepHistory = document.getElementById('keepHistory').checked;
     const messages = keepHistory ? chatHistory : [chatHistory[chatHistory.length - 1]];
     
     try {
         const response = await fetch(`${API_BASE}/api/chat`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: currentAgent.modelName,
                 messages: messages,
@@ -1239,512 +585,65 @@ async function sendMessage() {
         
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let fullResponse = '';
+        let fullText = '';
+        contentDiv.textContent = ''; 
         
-        // 清空"思考中"的内容
-        const contentDiv = assistantDiv.querySelector('.message-content');
-        if (contentDiv) contentDiv.textContent = '';
-        
-        while (true) {
-            const { done, value } = await reader.read();
+        while(true) {
+            const {done, value} = await reader.read();
             if (done) break;
             
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n').filter(line => line.trim());
+            const chunk = decoder.decode(value, {stream: true});
+            const lines = chunk.split('\n');
             
             for (const line of lines) {
+                if (!line.trim()) continue;
                 try {
                     const json = JSON.parse(line);
-                    if (json.message?.content) {
-                        fullResponse += json.message.content;
-                        if (contentDiv) {
-                            contentDiv.textContent = fullResponse;
-                        } else {
-                            assistantDiv.textContent = fullResponse;
-                        }
+                    if (json.message && json.message.content) {
+                        const content = json.message.content;
+                        fullText += content;
+                        contentDiv.textContent = fullText;
+                        const chatArea = document.getElementById('chatArea');
+                        chatArea.scrollTop = chatArea.scrollHeight;
                     }
-                } catch (e) {}
+                } catch(e) {}
             }
         }
         
-        chatHistory.push({ role: 'assistant', content: fullResponse, timestamp: Date.now() });
-        
-        // 更新消息操作按钮
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'message-actions';
-        
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'message-action-btn';
-        copyBtn.textContent = '📋';
-        copyBtn.title = '复制';
-        copyBtn.onclick = (e) => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(fullResponse).then(() => {
-                showToast('已复制到剪贴板', 'success', 2000);
-            });
-        };
-        
-        actionsDiv.appendChild(copyBtn);
-        assistantDiv.appendChild(actionsDiv);
-        
-        // 保存聊天记录
+        chatHistory.push({ role: 'assistant', content: fullText });
         saveChatHistory();
         
     } catch (error) {
-        const contentDiv = assistantDiv.querySelector('.message-content');
-        const errorMsg = '错误: ' + error.message;
-        if (contentDiv) {
-            contentDiv.textContent = errorMsg;
-        } else {
-            assistantDiv.textContent = errorMsg;
-        }
-        showToast('发送失败: ' + error.message, 'error');
-    } finally {
-        // 恢复输入框和发送按钮
-        input.disabled = false;
-        input.focus();
-        sendButtons.forEach(btn => {
-            btn.disabled = false;
-            btn.style.opacity = '1';
-        });
+        contentDiv.textContent = 'Error: ' + error.message;
+        contentDiv.style.color = '#ef4444';
     }
-}
+};
 
-// 添加消息到界面
 function addMessage(role, content) {
+    const container = document.getElementById('chatContainerInner');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${role}`;
+    
+    msgDiv.innerHTML = `
+        <div class="message-content">${content}</div>
+        <div class="message-time">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+    `;
+    
+    container.appendChild(msgDiv);
     const chatArea = document.getElementById('chatArea');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role}`;
-    
-    // 消息内容
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    contentDiv.textContent = content;
-    messageDiv.appendChild(contentDiv);
-    
-    // 时间戳
-    const timeDiv = document.createElement('div');
-    timeDiv.className = 'message-time';
-    timeDiv.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    messageDiv.appendChild(timeDiv);
-    
-    // 操作按钮（仅助手消息）
-    if (role === 'assistant' && content !== '思考中...') {
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'message-actions';
-        
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'message-action-btn';
-        copyBtn.textContent = '📋';
-        copyBtn.title = '复制';
-        copyBtn.onclick = (e) => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(content).then(() => {
-                showToast('已复制到剪贴板', 'success', 2000);
-            });
-        };
-        
-        actionsDiv.appendChild(copyBtn);
-        messageDiv.appendChild(actionsDiv);
-    }
-    
-    chatArea.appendChild(messageDiv);
     chatArea.scrollTop = chatArea.scrollHeight;
     
     if (role === 'user') {
-        chatHistory.push({ role: 'user', content, timestamp: Date.now() });
+        chatHistory.push({ role: 'user', content: content });
     }
     
-    return messageDiv;
+    return msgDiv;
 }
 
-// 保存聊天记录到 localStorage
-function saveChatHistory() {
-    if (currentAgent) {
-        const key = `chat_${currentAgent.modelName}`;
-        localStorage.setItem(key, JSON.stringify(chatHistory));
-    }
-}
-
-// 加载聊天记录
-function loadChatHistory() {
-    if (currentAgent) {
-        const key = `chat_${currentAgent.modelName}`;
-        const saved = localStorage.getItem(key);
-        if (saved) {
-            try {
-                chatHistory = JSON.parse(saved);
-                // 重新渲染聊天记录
-                const chatArea = document.getElementById('chatArea');
-                chatArea.innerHTML = '';
-                chatHistory.forEach(msg => {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = `message ${msg.role}`;
-                    
-                    const contentDiv = document.createElement('div');
-                    contentDiv.className = 'message-content';
-                    contentDiv.textContent = msg.content;
-                    messageDiv.appendChild(contentDiv);
-                    
-                    // 添加时间戳（如果有）
-                    if (msg.timestamp) {
-                        const timeDiv = document.createElement('div');
-                        timeDiv.className = 'message-time';
-                        timeDiv.textContent = new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-                        messageDiv.appendChild(timeDiv);
-                    }
-                    
-                    // 添加复制按钮（助手消息）
-                    if (msg.role === 'assistant') {
-                        const actionsDiv = document.createElement('div');
-                        actionsDiv.className = 'message-actions';
-                        
-                        const copyBtn = document.createElement('button');
-                        copyBtn.className = 'message-action-btn';
-                        copyBtn.textContent = '📋';
-                        copyBtn.title = '复制';
-                        copyBtn.onclick = (e) => {
-                            e.stopPropagation();
-                            navigator.clipboard.writeText(msg.content).then(() => {
-                                showToast('已复制到剪贴板', 'success', 2000);
-                            });
-                        };
-                        
-                        actionsDiv.appendChild(copyBtn);
-                        messageDiv.appendChild(actionsDiv);
-                    }
-                    
-                    chatArea.appendChild(messageDiv);
-                });
-                chatArea.scrollTop = chatArea.scrollHeight;
-            } catch (e) {
-                console.error('加载聊天记录失败:', e);
-            }
-        }
-    }
-}
-
-// 清空对话
-function clearChat() {
-    chatHistory = [];
-    document.getElementById('chatArea').innerHTML = '';
-    // 同时清除 localStorage
-    if (currentAgent) {
-        const key = `chat_${currentAgent.modelName}`;
-        localStorage.removeItem(key);
-    }
-    showToast('对话已清空', 'success', 2000);
-}
-
-// 切换欢迎页 Tab
-window.switchWelcomeTab = function(tab) {
-    // 更新 Tab 按钮状态
-    document.querySelectorAll('.welcome-tab').forEach(btn => {
-        if (btn.dataset.tab === tab) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
-    });
-    
-    // 切换内容
-    document.getElementById('quickTab').style.display = tab === 'quick' ? 'flex' : 'none';
-    document.getElementById('plazaTab').style.display = tab === 'plaza' ? 'block' : 'none';
-    
-    // 如果切换到广场，渲染智能体列表
-    if (tab === 'plaza') {
-        renderPlazaAgents();
-    }
-}
-
-// 渲染广场智能体列表
-function renderPlazaAgents() {
-    const container = document.getElementById('plazaAgentList');
-    const emptyDiv = document.getElementById('plazaEmpty');
-    
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    if (agents.length === 0) {
-        container.style.display = 'none';
-        if (emptyDiv) emptyDiv.style.display = 'block';
-        return;
-    }
-    
-    container.style.display = 'grid';
-    if (emptyDiv) emptyDiv.style.display = 'none';
-    
-    agents.forEach(agent => {
-        const card = document.createElement('div');
-        card.className = 'plaza-agent-card fade-in';
-        card.onclick = () => {
-            selectAgent(agent);
-            // 关闭移动端侧边栏
-            if (window.innerWidth <= 768) {
-                toggleMobileSidebar();
-            }
-        };
-        
-        card.innerHTML = `
-            <div class="plaza-agent-avatar">${agent.displayName.charAt(0).toUpperCase()}</div>
-            <div style="margin-bottom: 12px;">
-                <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px; color: #e0e0e0;">${agent.displayName}</div>
-                <div style="font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 4px;">
-                    <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
-                    </svg>
-                    ${agent.baseModel}
-                </div>
-            </div>
-            <div style="display: flex; gap: 8px;">
-                <button onclick="event.stopPropagation(); selectAgent(${JSON.stringify(agent).replace(/"/g, '&quot;')})" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; transition: all 0.2s;">
-                    <svg style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                    </svg>
-                    开始对话
-                </button>
-                <button onclick="event.stopPropagation(); editAgent(${JSON.stringify(agent).replace(/"/g, '&quot;')})" style="padding: 8px 12px; background: #374151; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; transition: all 0.2s;">
-                    <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                </button>
-            </div>
-        `;
-        
-        container.appendChild(card);
-    });
-}
-
-// 显示存储位置信息
-window.showStorageInfo = function() {
-    const modal = document.getElementById('storageInfoModal');
-    const pathDiv = document.getElementById('defaultStoragePath');
-    
-    if (!modal || !pathDiv) {
-        console.error('存储信息模态框元素未找到');
-        showToast('界面错误，请刷新页面', 'error');
-        return;
-    }
-    
-    // 根据操作系统显示默认路径
-    const platform = navigator.platform.toLowerCase();
-    const userAgent = navigator.userAgent.toLowerCase();
-    let defaultPath = '';
-    let osName = '';
-    
-    // 检测操作系统
-    if (platform.includes('win') || userAgent.includes('windows')) {
-        defaultPath = 'C:\\Users\\<用户名>\\.ollama\\models';
-        osName = 'Windows';
-    } else if (platform.includes('mac') || userAgent.includes('mac')) {
-        defaultPath = '~/.ollama/models';
-        osName = 'macOS';
-    } else if (platform.includes('linux') || userAgent.includes('linux')) {
-        defaultPath = '~/.ollama/models';
-        osName = 'Linux';
-    } else {
-        defaultPath = '~/.ollama/models';
-        osName = '未知系统';
-    }
-    
-    pathDiv.innerHTML = `
-        <div style="margin-bottom: 5px; color: #9ca3af; font-size: 11px;">检测到系统: ${osName}</div>
-        <div>${defaultPath}</div>
-    `;
-    modal.style.display = 'flex';
-}
-
-window.closeStorageInfo = function() {
-    const modal = document.getElementById('storageInfoModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-}
-
-// 复制命令
-window.copyCommand = function(elementId) {
-    const element = document.getElementById(elementId);
-    if (!element) {
-        showToast('元素未找到', 'error');
-        return;
-    }
-    
-    const text = element.textContent.trim();
-    
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('命令已复制到剪贴板', 'success');
-    }).catch(() => {
-        showToast('复制失败，请手动复制', 'error');
-    });
-}
-
-// 下载 Modelfile
-window.downloadModelfile = function() {
-    const displayName = document.getElementById('agentName').value.trim();
-    const baseModel = document.getElementById('baseModelSelect').value;
-    const systemPrompt = document.getElementById('systemPrompt').value.trim();
-    const temp = document.getElementById('temperature').value;
-    const topp = document.getElementById('top_p').value;
-    const topk = document.getElementById('top_k').value;
-    const repeat = document.getElementById('repeat_penalty').value;
-    const numCtx = document.getElementById('num_ctx').value;
-    const numPredict = document.getElementById('num_predict').value;
-    const seed = document.getElementById('seed').value;
-    const stopSeq = document.getElementById('stop_sequences').value.trim();
-    
-    if (!displayName || !baseModel) {
-        showToast('请填写智能体名称并选择底座模型', 'warning');
-        return;
-    }
-    
-    // 生成模型名称
-    let modelName = displayName
-        .toLowerCase()
-        .replace(/[^a-z0-9-_]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-    
-    if (!modelName || modelName === '-') {
-        modelName = 'agent-' + Date.now();
-    }
-    
-    // 生成 Modelfile
-    const lines = [
-        `FROM ${baseModel}`,
-        '',
-        `PARAMETER temperature ${temp}`,
-        `PARAMETER top_p ${topp}`,
-        `PARAMETER top_k ${topk}`,
-        `PARAMETER repeat_penalty ${repeat}`
-    ];
-    
-    if (numCtx !== '2048') {
-        lines.push(`PARAMETER num_ctx ${numCtx}`);
-    }
-    if (numPredict !== '-1') {
-        lines.push(`PARAMETER num_predict ${numPredict}`);
-    }
-    if (seed !== '0') {
-        lines.push(`PARAMETER seed ${seed}`);
-    }
-    if (stopSeq) {
-        const stops = stopSeq.split(',').map(s => s.trim()).filter(s => s);
-        stops.forEach(stop => {
-            lines.push(`PARAMETER stop "${stop}"`);
-        });
-    }
-    
-    lines.push('');
-    lines.push('SYSTEM """');
-    lines.push(systemPrompt || '你是一个友好的AI助手。');
-    lines.push('"""');
-    
-    const modelfile = lines.join('\n');
-    
-    // 创建下载（无后缀名）
-    const blob = new Blob([modelfile], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'Modelfile'; // 无后缀名
-    a.type = 'application/octet-stream';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    // 显示手动创建提示
-    const hint = document.getElementById('manualCreateHint');
-    const commandDiv = document.getElementById('createCommand');
-    commandDiv.textContent = `ollama create ${modelName} -f ~/Downloads/Modelfile`;
-    hint.style.display = 'block';
-    
-    showToast('Modelfile 已下载，请按提示手动创建', 'success', 5000);
-}
-
-// 处理输入框按键
-function handleInputKeydown(event) {
-    // Enter 发送，Shift+Enter 换行
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        sendMessage();
-    }
-}
-
-// 移动端侧边栏切换
-function toggleMobileSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    const overlay = document.getElementById('mobileOverlay');
-    
-    sidebar.classList.toggle('open');
-    overlay.classList.toggle('show');
-}
-
-// 选择智能体后自动关闭移动端侧边栏
-function selectAgentMobile(agent) {
-    selectAgent(agent);
-    
-    // 如果是移动端，关闭侧边栏
-    if (window.innerWidth <= 768) {
-        toggleMobileSidebar();
-    }
-}
-
-// 更新最近使用的智能体
-function updateRecentAgents(agent) {
-    let recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
-    
-    // 移除重复的
-    recent = recent.filter(a => a.modelName !== agent.modelName);
-    
-    // 添加到开头
-    recent.unshift({
-        modelName: agent.modelName,
-        displayName: agent.displayName,
-        lastUsed: Date.now()
-    });
-    
-    // 只保留最近 5 个
-    recent = recent.slice(0, 5);
-    
-    localStorage.setItem('recentAgents', JSON.stringify(recent));
-    renderRecentAgents();
-}
-
-// 渲染最近使用的智能体
-function renderRecentAgents() {
-    const container = document.getElementById('recentAgents');
-    if (!container) return;
-    
-    const recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
-    
-    if (recent.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
-    
-    container.innerHTML = `
-        <div style="margin-bottom: 20px;">
-            <h3 style="margin-bottom: 15px; font-size: 15px; color: #e0e0e0; display: flex; align-items: center; gap: 8px;">
-                <svg style="width: 18px; height: 18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 6v6l4 2"/>
-                </svg>
-                最近使用
-            </h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px;">
-                ${recent.map(agent => `
-                    <button onclick="selectAgentByName('${agent.modelName}')" style="padding: 16px; background: linear-gradient(135deg, #374151 0%, #2d3748 100%); border: 1px solid #4b5563; border-radius: 10px; color: white; cursor: pointer; transition: all 0.3s; text-align: left; box-shadow: 0 2px 8px rgba(0,0,0,0.2);" onmouseover="this.style.transform='translateY(-2px)'; this.style.borderColor='#2563eb'; this.style.boxShadow='0 4px 12px rgba(37, 99, 235, 0.2)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='#4b5563'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.2)'">
-                        <div style="font-weight: 500; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${agent.displayName}</div>
-                        <div style="font-size: 11px; color: #9ca3af;">${formatRelativeTime(agent.lastUsed)}</div>
-                    </button>
-                `).join('')}
-            </div>
-        </div>
-    `;
-}
+window.updateParamValue = function(id, value) {
+    const el = document.getElementById(id + 'Value');
+    if (el) el.textContent = value;
+};
 
 // 格式化相对时间
 function formatRelativeTime(timestamp) {
@@ -1757,139 +656,261 @@ function formatRelativeTime(timestamp) {
     if (minutes < 1) return '刚刚';
     if (minutes < 60) return `${minutes} 分钟前`;
     if (hours < 24) return `${hours} 小时前`;
-    if (days < 7) return `${days} 天前`;
-    return new Date(timestamp).toLocaleDateString('zh-CN');
+    return `${days} 天前`;
 }
 
-// 通过名称选择智能体
-window.selectAgentByName = function(modelName) {
-    const agent = agents.find(a => a.modelName === modelName);
-    if (agent) {
-        selectAgent(agent);
-    } else {
-        showToast('智能体不存在，可能已被删除', 'warning');
-    }
-}
-
-// 恢复上次选择的智能体
-function restoreLastAgent() {
-    const lastAgent = localStorage.getItem('lastAgent');
-    if (lastAgent) {
-        try {
-            const agent = JSON.parse(lastAgent);
-            // 检查智能体是否还存在
-            const exists = agents.find(a => a.modelName === agent.modelName);
-            if (exists) {
-                selectAgent(exists);
-            } else {
-                // 智能体已被删除，显示欢迎页面
-                showWelcomeScreen();
-            }
-        } catch (e) {
-            console.error('恢复智能体失败:', e);
-            showWelcomeScreen();
-        }
-    } else {
-        // 没有上次选择的智能体，显示欢迎页面
-        showWelcomeScreen();
-    }
-}
-
-// 显示欢迎页面
-function showWelcomeScreen() {
-    const welcomeScreen = document.getElementById('welcomeScreen');
-    const chatArea = document.getElementById('chatArea');
-    const inputArea = document.getElementById('inputArea');
-    const backToHomeBtn = document.getElementById('backToHomeBtn');
-    const keepHistoryLabel = document.getElementById('keepHistoryLabel');
-    const clearChatBtn = document.getElementById('clearChatBtn');
-    
-    if (welcomeScreen) welcomeScreen.style.display = 'flex';
-    if (chatArea) chatArea.style.display = 'none';
-    if (inputArea) inputArea.style.display = 'none';
-    if (backToHomeBtn) backToHomeBtn.style.display = 'none';
-    if (keepHistoryLabel) keepHistoryLabel.style.display = 'none';
-    if (clearChatBtn) clearChatBtn.style.display = 'none';
-    
-    // 清除当前智能体
-    currentAgent = null;
-    document.getElementById('currentAgentName').textContent = '选择一个智能体开始对话';
-    
-    // 更新侧边栏状态
-    renderAgentList();
-    
-    // 渲染最近使用
+function updateRecentAgents(agent) {
+    let recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
+    recent = recent.filter(a => a.modelName !== agent.modelName);
+    recent.unshift({ modelName: agent.modelName, displayName: agent.displayName, lastUsed: Date.now() });
+    localStorage.setItem('recentAgents', JSON.stringify(recent.slice(0, 4)));
     renderRecentAgents();
-    
-    // 如果在广场 Tab，渲染广场
-    const plazaTab = document.querySelector('.welcome-tab[data-tab="plaza"]');
-    if (plazaTab && plazaTab.classList.contains('active')) {
-        renderPlazaAgents();
-    }
 }
 
-// 返回首页
-window.backToHome = function() {
-    // 保存当前对话
-    if (currentAgent && chatHistory.length > 0) {
-        saveChatHistory();
+function renderRecentAgents() {
+    const container = document.getElementById('recentAgents');
+    if (!container) return;
+    const recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
+    if (recent.length === 0) {
+        container.innerHTML = '';
+        return;
     }
     
-    // 显示欢迎页面
-    showWelcomeScreen();
-    
-    // 清除 localStorage 中的最后选择
-    localStorage.removeItem('lastAgent');
-    
-    showToast('已返回首页', 'info', 2000);
+    container.innerHTML = `
+        <h3 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">最近使用</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;">
+            ${recent.map(a => `
+                <button onclick="selectAgentMobile('${a.modelName}')" style="padding: 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); text-align: left; color: var(--text-primary); transition: var(--transition-fast);">
+                    <div style="font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${a.displayName}</div>
+                    <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">${formatRelativeTime(a.lastUsed)}</div>
+                </button>
+            `).join('')}
+        </div>
+    `;
 }
 
-// 页面加载时初始化
-document.addEventListener('DOMContentLoaded', async () => {
-    // 先检查连接
-    const isConnected = await checkOllamaConnection();
+function renderPlazaAgents() {
+    const container = document.getElementById('plazaAgentList');
+    const empty = document.getElementById('plazaEmpty');
+    if (!container) return;
     
-    if (!isConnected) {
-        // 显示 Toast 提示
-        showToast(`无法连接到 Ollama (${API_BASE})
-
-请确保 Ollama 服务正在运行`, 'error', 8000);
+    container.innerHTML = '';
+    
+    if (agents.length === 0) {
+        container.style.display = 'none';
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+    
+    container.style.display = 'grid';
+    if (empty) empty.style.display = 'none';
+    
+    agents.forEach(agent => {
+        const card = document.createElement('div');
+        card.className = 'plaza-agent-card';
+        card.onclick = () => window.selectAgentMobile(agent.modelName);
         
-        // 显示连接失败的界面提示
-        const agentList = document.getElementById('agentList');
-        const noAgents = document.getElementById('noAgents');
-        agentList.innerHTML = '';
-        noAgents.style.display = 'block';
-        noAgents.innerHTML = `
-            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
-            <div style="color: #ef4444; font-weight: 500;">无法连接到 Ollama</div>
-            <div style="font-size: 12px; margin-top: 10px; color: #9ca3af; line-height: 1.5;">
-                请确保 Ollama 正在运行<br>
-                <br>
-                <strong>启动方法：</strong><br>
-                • macOS/Linux: 从应用启动<br>
-                • Windows: 从开始菜单启动<br>
-                <br>
-                端口: ${API_BASE}
+        card.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                <div class="agent-avatar" style="width: 48px; height: 48px; font-size: 20px;">${agent.displayName[0].toUpperCase()}</div>
+                <div>
+                    <div style="font-weight: 600; font-size: 16px;">${agent.displayName}</div>
+                    <div style="font-size: 12px; color: var(--text-tertiary);">${agent.baseModel}</div>
+                </div>
             </div>
-            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #2563eb; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px;">
-                重新连接
-            </button>
+            <button class="primary" style="width: 100%; font-size: 13px;">开始对话</button>
         `;
-        return; // 不再继续加载，避免后续的 loadModels 再次报错
+        container.appendChild(card);
+    });
+}
+
+window.backToHome = function() {
+    if (currentAgent) saveChatHistory();
+    currentAgent = null;
+    const welcome = document.getElementById('welcomeScreen');
+    if (welcome) welcome.style.display = 'flex';
+    
+    document.getElementById('chatArea').style.display = 'none';
+    document.getElementById('inputArea').style.display = 'none';
+    document.getElementById('backToHomeBtn').style.display = 'none';
+    document.getElementById('keepHistoryLabel').style.display = 'none';
+    document.getElementById('clearChatBtn').style.display = 'none';
+    
+    const nameEl = document.getElementById('currentAgentName');
+    if (nameEl) nameEl.textContent = '选择一个智能体开始对话';
+    
+    renderAgentList();
+    renderRecentAgents();
+};
+
+window.pullModel = async function() {
+    const name = document.getElementById('pullModelInput').value.trim();
+    if (!name) return showToast('请输入模型名称', 'warning');
+    
+    const methodEl = document.querySelector('input[name="pullMethod"]:checked');
+    const method = methodEl ? methodEl.value : 'api';
+    
+    if (method === 'cli') {
+        const cmd = `ollama pull ${name}`;
+        const cmdDiv = document.getElementById('pullCommand');
+        const hint = document.getElementById('pullCommandHint');
+        if (cmdDiv) cmdDiv.textContent = cmd;
+        if (hint) hint.style.display = 'block';
+        return;
     }
     
-    await loadModels();
+    const progress = document.getElementById('pullProgress');
+    if (progress) progress.style.display = 'block';
+    const progressText = document.getElementById('pullProgressText');
+    const progressBar = document.getElementById('pullProgressBar');
+    const percentText = document.getElementById('pullProgressPercent');
     
-    // 恢复上次选择的智能体
-    restoreLastAgent();
+    try {
+        const response = await fetch(`${API_BASE}/api/pull`, {
+            method: 'POST',
+            body: JSON.stringify({ name: name, stream: true })
+        });
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while(true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            for(const line of lines) {
+                if(!line) continue;
+                try {
+                    const json = JSON.parse(line);
+                    if(json.total) {
+                        const percent = Math.round((json.completed / json.total) * 100);
+                        if (progressBar) progressBar.style.width = `${percent}%`;
+                        if (percentText) percentText.textContent = `${percent}%`;
+                        if (progressText) progressText.textContent = json.status;
+                    } else if(json.status) {
+                        if (progressText) progressText.textContent = json.status;
+                    }
+                } catch(e) {}
+            }
+        }
+        
+        showToast('拉取完成', 'success');
+        setTimeout(() => {
+            if (progress) progress.style.display = 'none';
+            loadModels();
+        }, 1000);
+        
+    } catch(e) {
+        showToast('拉取失败: ' + e.message, 'error');
+        if (progress) progress.style.display = 'none';
+    }
+};
+
+window.updatePullMethod = function() {
+    const methodEl = document.querySelector('input[name="pullMethod"]:checked');
+    const method = methodEl ? methodEl.value : 'api';
+    const hint = document.getElementById('pullCommandHint');
+    const btn = document.getElementById('pullBtn');
+    
+    if (method === 'cli') {
+        if (hint) hint.style.display = 'block';
+        if (btn) btn.textContent = '生成命令';
+    } else {
+        if (hint) hint.style.display = 'none';
+        if (btn) btn.textContent = '拉取模型';
+    }
+};
+
+window.insertTemplate = function() {
+    const prompt = document.getElementById('systemPrompt');
+    if (prompt) {
+        prompt.value = `你是一个专业的助手。
+    
+性格特点：
+- 专业、客观
+- 乐于助人
+
+请用简洁的语言回答问题。`;
+        showToast('模板已插入');
+    }
+};
+
+window.downloadModelfile = function() {
+    const displayName = document.getElementById('agentName').value.trim();
+    const baseModel = document.getElementById('baseModelSelect').value;
+    
+    if (!displayName || !baseModel) {
+        showToast('请填写名称并选择底座模型', 'warning');
+        return;
+    }
+    showToast('功能暂未完全实现（纯前端模拟）');
+};
+
+// 历史记录保存与加载
+function saveChatHistory() {
+    if (currentAgent) {
+        localStorage.setItem(`chat_${currentAgent.modelName}`, JSON.stringify(chatHistory));
+    }
+}
+
+function loadChatHistory() {
+    chatHistory = [];
+    const container = document.getElementById('chatContainerInner');
+    if (container) container.innerHTML = '';
+    
+    if (currentAgent) {
+        try {
+            const saved = JSON.parse(localStorage.getItem(`chat_${currentAgent.modelName}`) || '[]');
+            saved.forEach(msg => {
+                addMessage(msg.role, msg.content);
+            });
+            chatHistory = saved;
+        } catch(e) {}
+    }
+}
+
+window.clearChat = function() {
+    chatHistory = [];
+    const container = document.getElementById('chatContainerInner');
+    if (container) container.innerHTML = '';
+    
+    if (currentAgent) {
+        localStorage.removeItem(`chat_${currentAgent.modelName}`);
+    }
+    showToast('对话已清空');
+};
+
+// 初始化
+document.addEventListener('DOMContentLoaded', async () => {
+    // 自动调整输入框高度
+    const input = document.getElementById('userInput');
+    if (input) {
+        input.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+    }
+
+    if (await checkOllamaConnection()) {
+        await loadModels();
+        try {
+            const last = JSON.parse(localStorage.getItem('lastAgent'));
+            if (last && agents.find(a => a.modelName === last.modelName)) {
+                selectAgent(last);
+            } else {
+                renderRecentAgents();
+            }
+        } catch(e) { renderRecentAgents(); }
+    } else {
+        handleConnectionError();
+    }
 });
 
-// 防止在拉取模型时刷新页面
-window.addEventListener('beforeunload', (e) => {
-    if (isPulling) {
+window.handleInputKeydown = function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        e.returnValue = '正在拉取模型，刷新页面会中断下载。确定要离开吗？';
-        return e.returnValue;
+        window.sendMessage();
     }
-});
+};

@@ -3,584 +3,173 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ollama Web 面板</title>
+    <title>Ollama Web UI</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🤖</text></svg>">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, sans-serif; background: #1a1a1a; color: #e0e0e0; line-height: 1.6; }
-        .container { display: flex; height: 100vh; position: relative; }
-        .sidebar { width: 280px; background: linear-gradient(180deg, #252525 0%, #1f1f1f 100%); padding: 15px; border-right: 1px solid #333; overflow-y: auto; display: flex; flex-direction: column; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        .main { flex: 1; display: flex; flex-direction: column; }
-        .header { background: linear-gradient(180deg, #252525 0%, #222 100%); padding: 15px 20px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-        .mobile-menu-btn { display: none; background: #374151; border: none; color: white; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 18px; transition: all 0.2s; }
-        .mobile-menu-btn:hover { background: #4b5563; transform: scale(1.05); }
-        
-        #backToHomeBtn:hover {
-            background: #4b5563;
-            transform: translateY(-1px);
-        }
-        .mobile-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; }
-        
-        /* 弹窗样式 */
-        .modal-overlay { 
-            position: fixed; 
-            top: 0; 
-            left: 0; 
-            right: 0; 
-            bottom: 0; 
-            background: rgba(0,0,0,0.8); 
-            z-index: 1001; 
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow-y: auto;
-        }
-        .modal-content { 
-            background: #252525; 
-            border-radius: 8px; 
-            max-width: 800px; 
-            width: 100%;
-            padding: 20px; 
-            max-height: 90vh; 
-            overflow-y: auto;
-            position: relative;
-            margin: auto;
-        }
-        .close-btn {
-            background: transparent;
-            border: none;
-            color: #9ca3af;
-            font-size: 24px;
-            cursor: pointer;
-            padding: 0;
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 4px;
-            transition: all 0.2s;
-        }
-        .close-btn:hover {
-            background: #374151;
-            color: white;
-        }
-        
-        /* 移动端适配 */
-        @media (max-width: 768px) {
-            .sidebar { 
-                position: fixed; 
-                left: 0; 
-                top: 0; 
-                bottom: 0; 
-                z-index: 1000; 
-                transform: translateX(-100%);
-                width: 80%;
-                max-width: 300px;
-            }
-            .sidebar.open { transform: translateX(0); }
-            .mobile-overlay.show { display: block; }
-            .mobile-menu-btn { display: block; }
-            .header { 
-                padding: 8px 12px; 
-                gap: 6px;
-                flex-wrap: nowrap; /* 强制单行 */
-            }
-            .chat-area { padding: 15px; }
-            .input-area { padding: 15px; }
-            .message { max-width: 90%; font-size: 14px; }
-            .agent-item { padding: 10px; }
-            .agent-avatar { width: 35px; height: 35px; font-size: 16px; }
-            .agent-name { font-size: 14px; }
-            .agent-base { font-size: 10px; }
-            
-            /* 移动端头部按钮优化 - 紧凑布局 */
-            .mobile-menu-btn {
-                padding: 6px 10px !important;
-                font-size: 16px !important;
-                min-width: auto !important;
-            }
-            
-            #backToHomeBtn {
-                padding: 6px 8px !important;
-                font-size: 12px !important;
-                margin-right: 0 !important;
-                min-width: auto !important;
-            }
-            #backToHomeBtn svg {
-                width: 16px !important;
-                height: 16px !important;
-                margin-right: 0 !important;
-            }
-            #backToHomeBtn span {
-                display: none; /* 移动端隐藏文字 */
-            }
-            
-            /* 智能体名称 - 缩小字体，限制宽度 */
-            #currentAgentName {
-                font-size: 12px !important;
-                line-height: 1.3;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                max-width: 90px; /* 减小宽度，给按钮留空间 */
-            }
-            
-            /* 移动端按钮优化 - 显示简化文字 */
-            #keepHistoryLabel {
-                gap: 3px !important;
-            }
-            #keepHistoryLabel span {
-                font-size: 11px !important; /* 缩小字体 */
-            }
-            #keepHistoryLabel input[type="checkbox"] {
-                width: 16px;
-                height: 16px;
-            }
-            
-            #clearChatBtn {
-                padding: 6px 8px !important;
-                font-size: 11px !important;
-                min-width: auto !important;
-                gap: 3px !important;
-            }
-            #clearChatBtn svg {
-                width: 12px !important;
-                height: 12px !important;
-            }
-            #clearChatBtn .btn-text {
-                font-size: 11px !important;
-            }
-        }
-        
-        /* 超小屏幕优化 */
-        @media (max-width: 480px) {
-            #currentAgentName {
-                max-width: 70px !important;
-                font-size: 11px !important;
-            }
-            
-            /* 进一步缩小按钮文字 */
-            #keepHistoryLabel span,
-            #clearChatBtn .btn-text {
-                font-size: 10px !important;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .sidebar { width: 85%; }
-            .header { font-size: 14px; }
-            #currentAgentName { font-size: 14px; }
-            .input-box textarea { min-height: 50px; font-size: 14px; }
-            .toast-container { top: 10px; right: 10px; left: 10px; }
-            .toast { min-width: auto; font-size: 13px; }
-            .modal-overlay { padding: 10px; }
-            .modal-content { padding: 15px; max-height: 95vh; }
-        }
-        .chat-area { flex: 1; overflow-y: auto; padding: 20px; scroll-behavior: smooth; }
-        .chat-area::-webkit-scrollbar { width: 8px; }
-        .chat-area::-webkit-scrollbar-track { background: #1a1a1a; }
-        .chat-area::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
-        .chat-area::-webkit-scrollbar-thumb:hover { background: #4b5563; }
-        
-        .sidebar::-webkit-scrollbar { width: 6px; }
-        .sidebar::-webkit-scrollbar-track { background: transparent; }
-        .sidebar::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-        .sidebar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
-        .input-area { padding: 20px; background: #252525; border-top: 1px solid #333; }
-        .message { margin-bottom: 20px; padding: 12px 16px; border-radius: 12px; max-width: 80%; position: relative; animation: messageSlideIn 0.3s ease-out; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        @keyframes messageSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .user { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); margin-left: auto; }
-        .assistant { background: linear-gradient(135deg, #374151 0%, #2d3748 100%); }
-        .message-time { font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 6px; }
-        .message-actions { position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity 0.2s; display: flex; gap: 4px; }
-        .message:hover .message-actions { opacity: 1; }
-        .message-action-btn { background: rgba(0,0,0,0.2); border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
-        .message-action-btn:hover { background: rgba(0,0,0,0.4); }
-        select, input, textarea, button { 
-            background: #333; color: #e0e0e0; border: 1px solid #444; 
-            padding: 10px; border-radius: 6px; font-size: 14px; 
-            transition: all 0.2s;
-        }
-        input:focus, textarea:focus, select:focus {
-            outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-        }
-        input[type="range"] { 
-            padding: 0; 
-            height: 6px; 
-            -webkit-appearance: none;
-            appearance: none;
-            background: #444;
-            border-radius: 3px;
-            outline: none;
-        }
-        input[type="range"]::-webkit-slider-thumb { 
-            -webkit-appearance: none;
-            appearance: none;
-            background: #2563eb; 
-            width: 16px; 
-            height: 16px; 
-            border-radius: 50%; 
-            cursor: pointer; 
-        }
-        input[type="range"]::-moz-range-thumb { 
-            background: #2563eb; 
-            width: 16px; 
-            height: 16px; 
-            border-radius: 50%; 
-            cursor: pointer; 
-            border: none; 
-        }
-        button { cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        button:hover { background: #444; transform: translateY(-1px); }
-        button:active { transform: translateY(0); }
-        button.primary { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3); }
-        button.primary:hover { background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); }
-        
-        /* 加载动画 */
-        .loading-spinner { display: inline-flex; align-items: center; gap: 8px; color: #9ca3af; }
-        .loading-spinner::before { content: ''; width: 16px; height: 16px; border: 2px solid #374151; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        
-        /* 淡入动画 */
-        .fade-in { animation: fadeIn 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        textarea { width: 100%; resize: vertical; font-family: inherit; line-height: 1.5; }
-        .input-box { display: flex; gap: 10px; }
-        .input-box textarea { 
-            flex: 1; 
-            min-height: 60px; 
-            max-height: 200px;
-            background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-        }
-        .input-box textarea:focus {
-            background: #333;
-        }
-        h3 { margin-bottom: 15px; color: #fff; }
-        .agent-item { padding: 12px; margin: 8px 0; background: linear-gradient(135deg, #2a2a2a 0%, #333 100%); border-radius: 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; position: relative; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid transparent; }
-        .agent-item:hover { background: linear-gradient(135deg, #333 0%, #3a3a3a 100%); transform: translateY(-2px); border-color: #2563eb; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15); }
-        .agent-item.active { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4); transform: translateY(-2px); }
-        .agent-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-        .agent-item.active .agent-avatar { box-shadow: 0 0 0 3px rgba(255,255,255,0.2); }
-        .agent-info { flex: 1; min-width: 0; }
-        .agent-name { font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .agent-base { font-size: 11px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .agent-status { width: 8px; height: 8px; border-radius: 50%; background: #10b981; position: absolute; top: 14px; right: 14px; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .agent-menu { padding: 4px 8px; opacity: 0; transition: opacity 0.2s; }
-        .agent-item:hover .agent-menu { opacity: 1; }
-        .menu-btn { background: transparent; border: none; color: #9ca3af; cursor: pointer; padding: 4px; font-size: 16px; }
-        .menu-btn:hover { color: #fff; }
-        .dropdown-menu { position: absolute; right: 10px; top: 45px; background: #1f2937; border: 1px solid #444; border-radius: 6px; padding: 5px; z-index: 100; display: none; min-width: 100px; }
-        .dropdown-menu.show { display: block; }
-        .dropdown-item { padding: 8px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; white-space: nowrap; }
-        .dropdown-item:hover { background: #374151; }
-        .new-agent-btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 500; margin-bottom: 15px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
-        .new-agent-btn:hover { background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4); }
-        .new-agent-btn:active { transform: translateY(0); }
-        .sidebar-footer { margin-top: auto; padding-top: 15px; border-top: 1px solid #333; }
-        .tab-buttons { display: flex; gap: 10px; margin-bottom: 15px; }
-        .tab-buttons button { flex: 1; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .modelfile-editor { height: 400px; font-family: 'Consolas', monospace; }
-        .status { padding: 5px 10px; border-radius: 4px; font-size: 12px; }
-        .status.success { background: #10b981; color: white; }
-        .status.error { background: #ef4444; color: white; }
-        
-        /* 代码块滚动条样式 */
-        div::-webkit-scrollbar {
-            height: 6px;
-        }
-        div::-webkit-scrollbar-track {
-            background: #1f2937;
-        }
-        div::-webkit-scrollbar-thumb {
-            background: #4b5563;
-            border-radius: 3px;
-        }
-        div::-webkit-scrollbar-thumb:hover {
-            background: #6b7280;
-        }
-        
-        /* Toast 通知 */
-        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
-        .toast { 
-            background: #1f2937; 
-            color: white; 
-            padding: 12px 20px; 
-            border-radius: 8px; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            min-width: 250px;
-            animation: slideIn 0.3s ease-out;
-            cursor: pointer;
-            position: relative;
-            padding-right: 40px;
-        }
-        .toast:hover { background: #374151; }
-        .toast-close {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #9ca3af;
-            font-size: 18px;
-            font-weight: bold;
-        }
-        .toast.success { border-left: 4px solid #10b981; }
-        .toast.error { border-left: 4px solid #ef4444; }
-        .toast.info { border-left: 4px solid #3b82f6; }
-        .toast.warning { border-left: 4px solid #f59e0b; }
-        
-        @keyframes slideIn {
-            from { transform: translateX(400px); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        
-        @keyframes slideOut {
-            from { transform: translateX(0); opacity: 1; }
-            to { transform: translateX(400px); opacity: 0; }
-        }
-        
-        .toast.hiding { animation: slideOut 0.3s ease-out; }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="toast-container" id="toastContainer"></div>
     <div class="mobile-overlay" id="mobileOverlay" onclick="toggleMobileSidebar()"></div>
     
     <div class="container">
+        <!-- 侧边栏 -->
         <div class="sidebar">
-            <h3 style="margin: 0 0 15px 0; display: flex; align-items: center; gap: 8px;">
-                <svg style="width: 20px; height: 20px;" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+            <h3 style="margin-top: 5px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/>
+                    <circle cx="12" cy="12" r="3"/>
                 </svg>
                 我的智能体
             </h3>
             
             <button class="new-agent-btn" onclick="createNewAgent()">
-                <svg style="width: 16px; height: 16px; vertical-align: middle; margin-right: 6px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M12 5v14M5 12h14"/>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
                 新建智能体
             </button>
             
-            <div id="agentList"></div>
+            <div id="agentList" style="flex: 1; overflow-y: auto;"></div>
             
-            <div id="noAgents" style="padding: 20px 10px; color: #9ca3af; font-size: 13px; text-align: center; display: none;">
-                <svg style="width: 48px; height: 48px; margin: 0 auto 10px; opacity: 0.5;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="8" r="4"/>
-                    <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+            <div id="noAgents" style="padding: 40px 10px; color: var(--text-tertiary); text-align: center; display: none;">
+                <svg width="40" height="40" style="opacity: 0.3; margin-bottom: 10px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
                 </svg>
-                <div>还没有智能体</div>
-                <div style="font-size: 12px; margin-top: 5px;">点击上方按钮创建第一个</div>
+                <div>暂无智能体</div>
             </div>
             
-            <div class="sidebar-footer">
-                <button onclick="toggleManagePanel()" style="width: 100%; padding: 8px; background: #374151; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px;">
-                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M12 1v6m0 6v6m5.2-13.2l-4.2 4.2m0 6l4.2 4.2M23 12h-6m-6 0H1m18.2 5.2l-4.2-4.2m0-6l4.2-4.2"/>
+            <div class="sidebar-footer" style="margin-top: auto; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                <button onclick="toggleManagePanel()" style="width: 100%; padding: 10px; background: rgba(255,255,255,0.03); color: var(--text-secondary); border-radius: var(--radius-md); font-size: 13px; justify-content: flex-start; gap: 10px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
                     </svg>
                     管理底座模型
                 </button>
             </div>
         </div>
         
+        <!-- 主区域 -->
         <div class="main">
             <div class="header">
                 <button class="mobile-menu-btn" onclick="toggleMobileSidebar()">☰</button>
-                <button id="backToHomeBtn" onclick="backToHome()" title="返回首页" style="display: none; padding: 8px 12px; background: #374151; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; margin-right: 10px; transition: all 0.2s; align-items: center; gap: 6px;">
-                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                
+                <button id="backToHomeBtn" onclick="backToHome()" title="返回首页" style="display: none; padding: 6px 12px; background: rgba(255,255,255,0.05); border-radius: 6px; color: var(--text-secondary); font-size: 13px; margin-right: 12px; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                        <path d="M9 22V12h6v10"/>
                     </svg>
                     <span>首页</span>
                 </button>
-                <div style="flex: 1; font-size: 16px; font-weight: 500;" id="currentAgentName">选择一个智能体开始对话</div>
-                <label id="keepHistoryLabel" style="display: none; align-items: center; gap: 5px; cursor: pointer;" title="保留历史对话">
-                    <input type="checkbox" id="keepHistory" checked>
-                    <span style="font-size: 13px;">保留历史</span>
-                </label>
-                <button id="clearChatBtn" onclick="clearChat()" style="display: none; font-size: 13px; align-items: center; gap: 4px;" title="清空对话">
-                    <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                    <span class="btn-text">清空对话</span>
-                </button>
+                
+                <div style="flex: 1; font-size: 15px; font-weight: 600; color: var(--text-primary);" id="currentAgentName">
+                    选择一个智能体开始对话
+                </div>
+                
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <label id="keepHistoryLabel" style="display: none; align-items: center; gap: 6px; cursor: pointer; color: var(--text-secondary); font-size: 13px;">
+                        <input type="checkbox" id="keepHistory" checked style="width: 14px; height: 14px; margin: 0;">
+                        <span>保留历史</span>
+                    </label>
+                    
+                    <button id="clearChatBtn" onclick="clearChat()" style="display: none; padding: 6px 10px; color: var(--text-tertiary); font-size: 13px; gap: 4px; background: transparent;" title="清空对话">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                        <span class="btn-text">清空</span>
+                    </button>
+                </div>
             </div>
             
-            <div class="chat-area" id="chatArea" style="display: none;"></div>
+            <div class="chat-area" id="chatArea" style="display: none;">
+                <div class="chat-container-inner" id="chatContainerInner">
+                    <!-- 消息将插入到这里 -->
+                </div>
+            </div>
             
             <!-- 欢迎页面 -->
-            <div id="welcomeScreen" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+            <div id="welcomeScreen" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; background: rgba(0,0,0,0.1);">
                 <!-- Tab 导航 -->
-                <div style="display: flex; gap: 0; border-bottom: 1px solid #333; background: #252525; padding: 0 20px;">
-                    <button class="welcome-tab active" data-tab="quick" onclick="switchWelcomeTab('quick')" style="padding: 15px 24px; background: transparent; border: none; color: #9ca3af; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.3s; font-size: 14px; font-weight: 500;">
-                        <svg style="width: 18px; height: 18px; vertical-align: middle; margin-right: 6px; fill: currentColor;" viewBox="0 0 24 24"><path d="M13 3L4 14h7l-2 7 9-11h-7l2-7z"/></svg>
+                <div style="display: flex; gap: 0; border-bottom: 1px solid var(--border-color); padding: 0 24px;">
+                    <!-- 移除内联样式，只保留 class -->
+                    <button class="welcome-tab active" data-tab="quick" onclick="switchWelcomeTab('quick')">
                         快速开始
                     </button>
-                    <button class="welcome-tab" data-tab="plaza" onclick="switchWelcomeTab('plaza')" style="padding: 15px 24px; background: transparent; border: none; color: #9ca3af; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.3s; font-size: 14px; font-weight: 500;">
-                        <svg style="width: 18px; height: 18px; vertical-align: middle; margin-right: 6px; fill: currentColor;" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z"/><path d="M7 11h10v2H7z"/></svg>
+                    <button class="welcome-tab" data-tab="plaza" onclick="switchWelcomeTab('plaza')">
                         智能体广场
                     </button>
                 </div>
                 
                 <!-- 快速开始内容 -->
-                <div id="quickTab" class="welcome-tab-content" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; overflow-y: auto;">
-                    <div style="max-width: 700px; width: 100%;">
-                        <div style="text-align: center; margin-bottom: 40px;" class="fade-in">
-                            <svg style="width: 80px; height: 80px; margin: 0 auto 20px; animation: float 3s ease-in-out infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                                <path d="M8 10h.01M12 10h.01M16 10h.01"/>
-                            </svg>
-                            <h1 style="margin-bottom: 10px; color: #e0e0e0; font-size: 32px; font-weight: 600;">欢迎使用 Ollama Web 面板</h1>
-                            <p style="color: #9ca3af; font-size: 16px;">与本地 AI 模型对话，打造专属智能助手</p>
+                <div id="quickTab" class="welcome-tab-content" style="flex: 1; display: flex; align-items: center; justify-content: center; overflow-y: auto;">
+                    <div style="max-width: 680px; width: 100%;">
+                        <div style="text-align: center; margin-bottom: 50px;" class="fade-in">
+                            <div style="width: 80px; height: 80px; margin: 0 auto 24px; background: linear-gradient(135deg, #2563eb, #7c3aed); border-radius: 24px; display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3);">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                                    <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/>
+                                    <path d="M12 16v-4M12 8h.01"/>
+                                </svg>
+                            </div>
+                            <h1 style="margin: 0 0 12px 0; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">Ollama Web UI</h1>
+                            <p style="color: var(--text-secondary); font-size: 16px; max-width: 400px; margin: 0 auto;">本地 AI 模型的现代化交互界面，简单、安全、高效。</p>
                         </div>
                     
-                    <div id="recentAgents" style="margin-bottom: 30px;"></div>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 30px;">
-                        <button onclick="createNewAgent()" style="padding: 20px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 12px; color: white; cursor: pointer; text-align: left; transition: all 0.3s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);" onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 20px rgba(37, 99, 235, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(37, 99, 235, 0.3)'">
-                            <svg style="width: 36px; height: 36px; margin-bottom: 10px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M12 2a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                                <path d="M12 19v3"/>
-                                <path d="M8 22h8"/>
-                            </svg>
-                            <div style="font-weight: 600; font-size: 16px; margin-bottom: 6px;">创建新智能体</div>
-                            <div style="font-size: 13px; color: #93c5fd; line-height: 1.5;">自定义角色、参数和提示词，打造专属 AI 助手</div>
-                        </button>
+                        <div id="recentAgents" style="margin-bottom: 30px;"></div>
                         
-                        <button onclick="toggleManagePanel()" style="padding: 20px; background: linear-gradient(135deg, #374151 0%, #2d3748 100%); border: none; border-radius: 12px; color: white; cursor: pointer; text-align: left; transition: all 0.3s; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);" onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 20px rgba(0, 0, 0, 0.3)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(0, 0, 0, 0.2)'">
-                            <svg style="width: 36px; height: 36px; margin-bottom: 10px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                                <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/>
-                            </svg>
-                            <div style="font-weight: 600; font-size: 16px; margin-bottom: 6px;">管理底座模型</div>
-                            <div style="font-size: 13px; color: #9ca3af; line-height: 1.5;">拉取和管理 Ollama 模型库</div>
-                        </button>
-                    </div>
-                    
-                    <div style="padding: 20px; background: linear-gradient(135deg, #1f2937 0%, #111827 100%); border-radius: 12px; border: 1px solid #374151;">
-                        <h3 style="margin-bottom: 15px; font-size: 15px; color: #e0e0e0; display: flex; align-items: center; gap: 8px;">
-                            <svg style="width: 18px; height: 18px;" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                            </svg>
-                            使用提示
-                        </h3>
-                        <div style="display: grid; gap: 12px; font-size: 13px; color: #9ca3af; line-height: 1.6;">
-                            <div style="display: flex; gap: 10px;">
-                                <span style="color: #2563eb; flex-shrink: 0;">1.</span>
-                                <span>首次使用需要先拉取底座模型（如 qwen2.5:7b、gemma2:9b）</span>
-                            </div>
-                            <div style="display: flex; gap: 10px;">
-                                <span style="color: #2563eb; flex-shrink: 0;">2.</span>
-                                <span>基于底座模型创建智能体，设置角色和参数</span>
-                            </div>
-                            <div style="display: flex; gap: 10px;">
-                                <span style="color: #2563eb; flex-shrink: 0;">3.</span>
-                                <span>选择智能体开始对话，支持保留历史记录</span>
-                            </div>
-                            <div style="display: flex; gap: 10px;">
-                                <span style="color: #2563eb; flex-shrink: 0;">4.</span>
-                                <span>使用 Enter 发送消息，Shift+Enter 换行</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                        <div style="margin-top: 30px; text-align: center; font-size: 12px; color: #6b7280;">
-                            <div style="margin-bottom: 8px;">
-                                <svg style="width: 16px; height: 16px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                                Powered by Ollama
-                            </div>
-                            <div>本地运行，数据安全，完全免费</div>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 40px;">
+                            <button onclick="createNewAgent()" style="padding: 24px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); text-align: left; transition: var(--transition-smooth);" onmouseover="this.style.borderColor='rgba(37,99,235,0.5)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                                <div style="width: 40px; height: 40px; background: rgba(37,99,235,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; color: #3b82f6;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                                </div>
+                                <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px; color: var(--text-primary);">创建新智能体</div>
+                                <div style="font-size: 13px; color: var(--text-tertiary);">自定义角色、参数和提示词</div>
+                            </button>
+                            
+                            <button onclick="toggleManagePanel()" style="padding: 24px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); text-align: left; transition: var(--transition-smooth);" onmouseover="this.style.borderColor='rgba(37,99,235,0.5)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+                                <div style="width: 40px; height: 40px; background: rgba(37,99,235,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; color: #3b82f6;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                                </div>
+                                <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px; color: var(--text-primary);">管理模型库</div>
+                                <div style="font-size: 13px; color: var(--text-tertiary);">拉取、删除和管理底座模型</div>
+                            </button>
                         </div>
                     </div>
                 </div>
                 
                 <!-- 智能体广场内容 -->
-                <div id="plazaTab" class="welcome-tab-content" style="flex: 1; display: none; padding: 20px; overflow-y: auto;">
-                    <div style="max-width: 1200px; margin: 0 auto;">
-                        <div style="margin-bottom: 20px;">
-                            <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 8px; color: #e0e0e0;">智能体广场</h2>
-                            <p style="color: #9ca3af; font-size: 14px;">浏览和管理所有智能体</p>
+                <div id="plazaTab" class="welcome-tab-content" style="flex: 1; display: none; overflow-y: auto;">
+                    <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+                        <div style="margin-bottom: 24px;">
+                            <h2 style="font-size: 20px; font-weight: 600; color: var(--text-primary);">所有智能体</h2>
+                            <p style="color: var(--text-secondary); font-size: 14px;">管理和切换已创建的 AI 助手</p>
                         </div>
                         
-                        <div id="plazaAgentList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+                        <div id="plazaAgentList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
                             <!-- 动态加载智能体卡片 -->
                         </div>
                         
-                        <div id="plazaEmpty" style="display: none; text-align: center; padding: 60px 20px; color: #9ca3af;">
-                            <svg style="width: 64px; height: 64px; margin: 0 auto 16px; opacity: 0.5;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="10"/>
-                                <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>
-                            </svg>
-                            <div style="font-size: 16px; margin-bottom: 8px;">还没有智能体</div>
-                            <div style="font-size: 13px; margin-bottom: 20px;">创建第一个智能体开始使用</div>
-                            <button onclick="createNewAgent()" style="padding: 10px 20px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 8px; color: white; cursor: pointer; font-size: 14px;">
-                                <svg style="width: 16px; height: 16px; vertical-align: middle; margin-right: 6px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                                创建智能体
-                            </button>
+                        <div id="plazaEmpty" style="display: none; text-align: center; padding: 60px 20px;">
+                            <div style="color: var(--text-tertiary); margin-bottom: 20px;">暂无智能体</div>
+                            <button class="primary" onclick="createNewAgent()">立即创建</button>
                         </div>
                     </div>
                 </div>
             </div>
             
-            <style>
-                @keyframes float {
-                    0%, 100% { transform: translateY(0); }
-                    50% { transform: translateY(-10px); }
-                }
-                
-                .welcome-tab.active {
-                    color: #2563eb;
-                    border-bottom-color: #2563eb;
-                }
-                
-                .welcome-tab:hover {
-                    color: #e0e0e0;
-                }
-                
-                .plaza-agent-card {
-                    padding: 20px;
-                    background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-                    border-radius: 12px;
-                    border: 1px solid #444;
-                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                    cursor: pointer;
-                }
-                
-                .plaza-agent-card:hover {
-                    border-color: #2563eb;
-                    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.2);
-                    transform: translateY(-4px);
-                }
-                
-                .plaza-agent-avatar {
-                    width: 60px;
-                    height: 60px;
-                    border-radius: 50%;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 28px;
-                    margin-bottom: 16px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                }
-            </style>
-            
             <div class="input-area" id="inputArea" style="display: none;">
                 <div class="input-box">
-                    <textarea id="userInput" placeholder="输入消息... (Enter发送，Shift+Enter换行)" onkeydown="handleInputKeydown(event)"></textarea>
-                    <button onclick="sendMessage()" class="primary">发送<br>(Enter)</button>
+                    <textarea id="userInput" placeholder="输入消息... (Shift+Enter 换行)" onkeydown="handleInputKeydown(event)"></textarea>
+                    <button onclick="sendMessage()" class="primary" style="border-radius: 8px; width: 40px; height: 40px; padding: 0;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transform: rotate(45deg) translateX(-2px);">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+                <div style="text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 10px;">
+                    AI 可能会产生错误信息，请核对重要事实。
                 </div>
             </div>
         </div>
@@ -588,253 +177,160 @@
 
     <!-- 管理底座模型面板 -->
     <div id="managePanel" class="modal-overlay" style="display: none;" onclick="closeManagePanel()">
-        <div class="modal-content" style="max-width: 600px;" onclick="event.stopPropagation()">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0;">🔹 底座模型管理</h3>
-                <button onclick="closeManagePanel()" class="close-btn">✕</button>
+        <div class="modal-content" style="max-width: 600px; margin: 5vh auto;" onclick="event.stopPropagation()">
+            <div style="padding: 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 16px;">模型管理</h3>
+                <button onclick="closeManagePanel()" style="background: transparent; color: var(--text-tertiary); font-size: 20px;">✕</button>
             </div>
             
-            <div style="margin: 20px 0;">
-                <h4 style="margin-bottom: 10px;">拉取新模型</h4>
-                <input type="text" id="pullModelInput" placeholder="例如: qwen2.5:7b, gemma2:9b" style="width: 100%; margin-bottom: 10px;">
+            <div style="padding: 20px;">
+                <h4 style="margin: 0 0 12px 0; font-size: 14px; color: var(--text-secondary);">拉取新模型</h4>
+                <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                    <input type="text" id="pullModelInput" placeholder="例如: qwen2.5:7b, llama3" style="flex: 1;">
+                    <button onclick="pullModel()" class="primary" id="pullBtn" style="white-space: nowrap;">拉取模型</button>
+                </div>
                 
-                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; flex: 1; padding: 8px; background: #374151; border-radius: 4px;">
+                <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-secondary); font-size: 13px;">
                         <input type="radio" name="pullMethod" value="api" checked onchange="updatePullMethod()">
-                        <span style="font-size: 13px;">HTTP API</span>
+                        API 模式
                     </label>
-                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; flex: 1; padding: 8px; background: #374151; border-radius: 4px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-secondary); font-size: 13px;">
                         <input type="radio" name="pullMethod" value="cli" onchange="updatePullMethod()">
-                        <span style="font-size: 13px;">命令行</span>
+                        命令行模式
                     </label>
                 </div>
                 
-                <button onclick="pullModel()" class="primary" style="width: 100%;" id="pullBtn">拉取模型</button>
-                
-                <div id="pullCommandHint" style="display: none; margin-top: 10px; padding: 10px; background: #374151; border-radius: 4px; font-size: 12px;">
-                    <div style="margin-bottom: 5px; color: #e0e0e0;">请在终端执行以下命令：</div>
-                    <div style="background: #1f2937; padding: 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: #10b981; word-break: break-all; font-size: 13px; font-weight: 500; min-height: 20px;" id="pullCommand">命令将显示在这里</div>
-                    <div style="margin-top: 5px; font-size: 11px; color: #9ca3af;">💡 命令行方式可以看到更详细的进度信息</div>
+                <div id="pullCommandHint" style="display: none; margin-bottom: 20px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); border: 1px dashed var(--border-color);">
+                    <div style="font-family: monospace; color: #10b981; font-size: 13px;" id="pullCommand"></div>
                 </div>
                 
-                <div id="pullStatus" style="margin-top: 10px;"></div>
-                <div id="pullProgress" style="display: none; margin-top: 10px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px;">
+                <div id="pullProgress" style="display: none; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);">
                         <span id="pullProgressText">准备中...</span>
                         <span id="pullProgressPercent">0%</span>
                     </div>
-                    <div style="width: 100%; height: 8px; background: #374151; border-radius: 4px; overflow: hidden;">
-                        <div id="pullProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #2563eb, #3b82f6); transition: width 0.3s;"></div>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 11px; color: #9ca3af;">
-                        <span id="pullSpeed">速度: --</span>
-                        <span id="pullSize">大小: --</span>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div id="pullProgressBar" style="width: 0%; height: 100%; background: var(--primary-gradient); transition: width 0.3s;"></div>
                     </div>
                 </div>
-            </div>
-            
-            <div style="margin: 20px 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h4 style="margin: 0;">已安装的底座模型</h4>
-                    <button onclick="showStorageInfo()" style="padding: 4px 10px; font-size: 11px; background: #374151;">📁 存储位置</button>
-                </div>
-                <div id="baseModelList"></div>
+                
+                <h4 style="margin: 24px 0 12px 0; font-size: 14px; color: var(--text-secondary); display: flex; justify-content: space-between;">
+                    已安装模型
+                    <button onclick="showStorageInfo()" style="font-size: 12px; color: #3b82f6; background: transparent;">查看存储位置</button>
+                </h4>
+                <div id="baseModelList" style="max-height: 300px; overflow-y: auto;"></div>
             </div>
         </div>
     </div>
-
-    <!-- 存储位置信息 -->
+    
+    <!-- 存储位置信息 (复用现有结构，仅更新类名) -->
     <div id="storageInfoModal" class="modal-overlay" style="display: none;" onclick="closeStorageInfo()">
-        <div class="modal-content" style="max-width: 700px;" onclick="event.stopPropagation()">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0;">📁 模型存储位置</h3>
-                <button onclick="closeStorageInfo()" class="close-btn">✕</button>
-            </div>
-            
-            <div style="margin-bottom: 20px; padding: 15px; background: #1f2937; border-radius: 6px;">
-                <div style="font-size: 13px; color: #9ca3af; margin-bottom: 8px;">默认存储路径：</div>
-                <div id="defaultStoragePath" style="font-family: monospace; color: #10b981; font-size: 13px; word-break: break-all;"></div>
-            </div>
-            
-            <div style="margin-bottom: 20px;">
-                <h4 style="margin-bottom: 10px; font-size: 14px;">💡 如何修改存储位置</h4>
-                <div style="background: #374151; padding: 15px; border-radius: 6px; font-size: 13px; line-height: 1.6;">
-                    <div style="margin-bottom: 15px;">
-                        <strong style="color: #10b981;">Windows:</strong>
-                        <ol style="margin: 8px 0 0 20px; color: #e0e0e0;">
-                            <li>右键"此电脑" → 属性 → 高级系统设置</li>
-                            <li>点击"环境变量"</li>
-                            <li>在"系统变量"中点击"新建"</li>
-                            <li>变量名: <code style="background: #1f2937; padding: 2px 6px; border-radius: 3px;">OLLAMA_MODELS</code></li>
-                            <li>变量值: <code style="background: #1f2937; padding: 2px 6px; border-radius: 3px;">D:\ollama\models</code> (你的目标路径)</li>
-                            <li>重启 Ollama 服务</li>
-                        </ol>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <strong style="color: #10b981;">macOS/Linux:</strong>
-                        <div style="margin-top: 8px; background: #1f2937; padding: 10px; border-radius: 4px; font-family: monospace; color: #10b981; font-size: 12px;">
-                            export OLLAMA_MODELS="/path/to/models"
-                        </div>
-                        <div style="margin-top: 5px; color: #9ca3af; font-size: 11px;">
-                            添加到 ~/.bashrc 或 ~/.zshrc 使其永久生效
-                        </div>
-                    </div>
-                    
-                    <div style="padding: 10px; background: #1f2937; border-radius: 4px; border-left: 3px solid #f59e0b;">
-                        <div style="color: #f59e0b; font-size: 12px; margin-bottom: 5px;">⚠️ 注意</div>
-                        <div style="color: #9ca3af; font-size: 11px;">
-                            • 修改后需要重启 Ollama 服务才能生效<br>
-                            • 已下载的模型需要手动移动到新位置<br>
-                            • 确保新路径有足够的磁盘空间
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <h4 style="margin-bottom: 10px; font-size: 14px;">🔧 快速设置命令</h4>
-                <div style="background: #374151; padding: 10px; border-radius: 6px;">
-                    <div style="font-size: 12px; color: #9ca3af; margin-bottom: 5px;">Windows (PowerShell 管理员):</div>
-                    <div style="background: #1f2937; padding: 8px; border-radius: 4px; margin-bottom: 10px; position: relative;">
-                        <div style="font-family: 'Courier New', monospace; color: #10b981; font-size: 11px; overflow-x: auto; white-space: nowrap; padding-right: 60px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937;" id="winCommand">[System.Environment]::SetEnvironmentVariable('OLLAMA_MODELS', 'D:\ollama\models', 'Machine')</div>
-                        <button onclick="copyCommand('winCommand')" style="position: absolute; right: 8px; top: 8px; padding: 4px 8px; background: #2563eb; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">复制</button>
-                    </div>
-                    
-                    <div style="font-size: 12px; color: #9ca3af; margin-bottom: 5px;">macOS/Linux:</div>
-                    <div style="background: #1f2937; padding: 8px; border-radius: 4px; position: relative;">
-                        <div style="font-family: 'Courier New', monospace; color: #10b981; font-size: 11px; overflow-x: auto; white-space: nowrap; padding-right: 60px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937;" id="unixCommand">echo 'export OLLAMA_MODELS="/path/to/models"' >> ~/.zshrc</div>
-                        <button onclick="copyCommand('unixCommand')" style="position: absolute; right: 8px; top: 8px; padding: 4px 8px; background: #2563eb; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">复制</button>
-                    </div>
-                </div>
-            </div>
+        <div class="modal-content" style="max-width: 600px; margin: 10vh auto; padding: 24px;" onclick="event.stopPropagation()">
+            <h3 style="margin-top: 0;">存储位置</h3>
+            <div id="defaultStoragePath" style="padding: 12px; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); font-family: monospace; margin: 15px 0;"></div>
+            <button onclick="closeStorageInfo()" class="primary" style="width: 100%;">关闭</button>
         </div>
     </div>
 
     <!-- 智能体编辑器 -->
     <div id="agentEditor" class="modal-overlay" style="display: none;" onclick="closeAgentEditor()">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div class="modal-content" style="max-width: 800px; margin: 5vh auto; max-height: 90vh; display: flex; flex-direction: column;" onclick="event.stopPropagation()">
+            <div style="padding: 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                 <h3 style="margin: 0;" id="editorTitle">创建智能体</h3>
-                <button onclick="closeAgentEditor()" class="close-btn">✕</button>
+                <button onclick="closeAgentEditor()" style="background: transparent; color: var(--text-tertiary); font-size: 20px;">✕</button>
             </div>
             
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">智能体名称（显示名）</label>
-                <input type="text" id="agentName" placeholder="例如: 我的助手、小美" style="width: 100%;">
-                <small style="color: #9ca3af; font-size: 11px;">💡 可以使用中文，系统会自动生成英文模型名</small>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">选择底座模型</label>
-                <select id="baseModelSelect" style="width: 100%;">
-                    <option value="">选择底座模型...</option>
-                </select>
-                <small style="color: #9ca3af;">如果没有底座模型，请先在侧边栏"管理底座模型"中拉取</small>
-            </div>
-
-            <div style="margin-bottom: 15px;">
-                <label style="display: block; margin-bottom: 10px; font-weight: 500;">参数配置</label>
-                <div style="background: #1f2937; padding: 15px; border-radius: 6px;">
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                            <span>🌡️ Temperature (创造性)</span>
-                            <span id="tempValue">0.8</span>
-                        </label>
-                        <input type="range" id="temperature" min="0" max="5" step="0.1" value="0.8" style="width: 100%;" oninput="updateParamValue('temp', this.value)">
-                        <small style="color: #9ca3af; font-size: 11px;">低=保守准确，高=创意随机 (推荐: 0.7-1.5，极限创意可到 3-5)</small>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                            <span>🎯 Top P (多样性)</span>
-                            <span id="toppValue">0.9</span>
-                        </label>
-                        <input type="range" id="top_p" min="0" max="1" step="0.05" value="0.9" style="width: 100%;" oninput="updateParamValue('topp', this.value)">
-                        <small style="color: #9ca3af; font-size: 11px;">控制词汇选择范围 (推荐: 0.9-0.95)</small>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                            <span>🔢 Top K (候选词数)</span>
-                            <span id="topkValue">40</span>
-                        </label>
-                        <input type="range" id="top_k" min="1" max="100" step="1" value="40" style="width: 100%;" oninput="updateParamValue('topk', this.value)">
-                        <small style="color: #9ca3af; font-size: 11px;">每次选择考虑的词数 (推荐: 40-60)</small>
+            <div style="padding: 20px; overflow-y: auto; flex: 1;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">名称</label>
+                        <input type="text" id="agentName" placeholder="给助手起个名字" style="width: 100%;">
                     </div>
                     <div>
-                        <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                            <span>🔁 Repeat Penalty (防重复)</span>
-                            <span id="repeatValue">1.1</span>
-                        </label>
-                        <input type="range" id="repeat_penalty" min="0.5" max="3" step="0.05" value="1.1" style="width: 100%;" oninput="updateParamValue('repeat', this.value)">
-                        <small style="color: #9ca3af; font-size: 11px;">惩罚重复内容 (推荐: 1.1-1.3，更高会强制多样性)</small>
+                        <label style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text-secondary);">底座模型</label>
+                        <select id="baseModelSelect" style="width: 100%;"></select>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <label style="font-size: 13px; color: var(--text-secondary);">角色设定 (System Prompt)</label>
+                        <button onclick="insertTemplate()" style="font-size: 12px; color: #3b82f6; background: transparent;">插入模板</button>
+                    </div>
+                    <textarea id="systemPrompt" style="width: 100%; height: 150px; font-family: inherit;" placeholder="描述这个助手的性格、能力和行为准则..."></textarea>
+                </div>
+                
+                <div style="background: rgba(0,0,0,0.2); border-radius: var(--radius-md); padding: 16px;">
+                    <h4 style="margin: 0 0 16px 0; font-size: 14px; color: var(--text-secondary);">模型参数</h4>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div>
+                            <label style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                <span>创造性 (Temperature)</span>
+                                <span id="tempValue" style="color: #3b82f6;">0.8</span>
+                            </label>
+                            <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.8" style="width: 100%;" oninput="updateParamValue('temp', this.value)">
+                        </div>
+                        <div>
+                            <label style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                <span>上下文长度 (Context)</span>
+                                <span id="ctxValue" style="color: #3b82f6;">2048</span>
+                            </label>
+                            <input type="range" id="num_ctx" min="512" max="8192" step="512" value="2048" style="width: 100%;" oninput="updateParamValue('ctx', this.value)">
+                        </div>
                     </div>
                     
+                    <!-- 隐藏的高级参数，点击展开 -->
                     <details style="margin-top: 15px;">
-                        <summary style="cursor: pointer; padding: 8px; background: #374151; border-radius: 4px; user-select: none;">⚙️ 高级参数（可选）</summary>
-                        <div style="margin-top: 15px; padding: 15px; background: #111827; border-radius: 6px;">
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                                    <span>📏 上下文长度 (num_ctx)</span>
-                                    <span id="ctxValue">2048</span>
+                        <summary style="font-size: 12px; color: var(--text-tertiary); cursor: pointer;">更多高级参数...</summary>
+                        <div style="padding-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                             <div>
+                                <label style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                    <span>Top P</span>
+                                    <span id="toppValue">0.9</span>
                                 </label>
-                                <input type="range" id="num_ctx" min="512" max="32768" step="512" value="2048" style="width: 100%;" oninput="updateParamValue('ctx', this.value)">
-                                <small style="color: #9ca3af; font-size: 11px;">模型记忆的上下文长度，取决于模型支持的最大值</small>
+                                <input type="range" id="top_p" min="0" max="1" step="0.05" value="0.9" style="width: 100%;" oninput="updateParamValue('topp', this.value)">
                             </div>
-                            
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                                    <span>📝 最大生成长度 (num_predict)</span>
-                                    <span id="predictValue">-1</span>
+                            <div>
+                                <label style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                    <span>Top K</span>
+                                    <span id="topkValue">40</span>
                                 </label>
-                                <input type="range" id="num_predict" min="-1" max="4096" step="128" value="-1" style="width: 100%;" oninput="updateParamValue('predict', this.value)">
-                                <small style="color: #9ca3af; font-size: 11px;">单次回复最大长度，-1 表示无限制</small>
+                                <input type="range" id="top_k" min="1" max="100" step="1" value="40" style="width: 100%;" oninput="updateParamValue('topk', this.value)">
                             </div>
-                            
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 13px;">
-                                    <span>🎲 随机种子 (seed)</span>
+                            <div>
+                                <label style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                    <span>重复惩罚 (Repeat Penalty)</span>
+                                    <span id="repeatValue">1.1</span>
+                                </label>
+                                <input type="range" id="repeat_penalty" min="1" max="2" step="0.1" value="1.1" style="width: 100%;" oninput="updateParamValue('repeat', this.value)">
+                            </div>
+                            <div>
+                                <label style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px;">
+                                    <span>随机种子 (Seed)</span>
                                     <span id="seedValue">0</span>
                                 </label>
-                                <input type="range" id="seed" min="0" max="999999" step="1" value="0" style="width: 100%;" oninput="updateParamValue('seed', this.value)">
-                                <small style="color: #9ca3af; font-size: 11px;">0 表示随机，固定值可复现相同结果</small>
+                                <input type="range" id="seed" min="0" max="100" step="1" value="0" style="width: 100%;" oninput="updateParamValue('seed', this.value)">
                             </div>
-                            
-                            <div>
-                                <label style="display: block; margin-bottom: 5px; font-size: 13px;">🛑 停止词 (stop)</label>
-                                <input type="text" id="stop_sequences" placeholder="用逗号分隔，例如: \n,###,END" style="width: 100%; padding: 8px; background: #1f2937; border: 1px solid #374151; border-radius: 4px; color: white; font-size: 12px;">
-                                <small style="color: #9ca3af; font-size: 11px;">遇到这些词时停止生成</small>
-                            </div>
+                            <!-- 隐藏的参数作为隐藏域存在，以兼容 JS -->
+                            <input type="hidden" id="num_predict" value="-1">
+                            <input type="hidden" id="stop_sequences" value="">
                         </div>
                     </details>
                 </div>
-            </div>
-            
-            <div style="margin-bottom: 15px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <label style="font-weight: 500;">系统提示词（角色设定）</label>
-                    <button onclick="insertTemplate()" style="padding: 4px 10px; font-size: 12px; background: #374151;">📝 插入模板</button>
+
+                <div id="agentStatus" style="margin-top: 20px; min-height: 20px;"></div>
+                
+                <div id="manualCreateHint" style="display: none; margin-top: 15px; padding: 15px; background: rgba(245, 158, 11, 0.1); border-left: 3px solid #f59e0b; border-radius: 4px;">
+                     <div style="color: #f59e0b; font-size: 13px; margin-bottom: 5px;">如自动创建失败，请尝试手动创建：</div>
+                     <div id="createCommand" style="font-family: monospace; font-size: 12px; color: var(--text-secondary);"></div>
                 </div>
-                <textarea id="systemPrompt" style="width: 100%; min-height: 200px; font-family: inherit;" placeholder="直接写角色设定即可，不需要写 FROM 等内容&#10;&#10;例如：&#10;你是一个活泼开朗的AI助手小美，性格特点：&#10;- 说话风格轻松幽默&#10;- 喜欢用表情符号&#10;- 擅长鼓励和安慰他人"></textarea>
-                <small style="color: #9ca3af; font-size: 11px;">💡 提示：只需要写角色的性格、背景、说话风格等，系统会自动生成完整的 Modelfile</small>
             </div>
             
-            <div style="display: flex; gap: 10px; margin-top: 15px;">
-                <button onclick="saveAgent()" class="primary" style="flex: 1;" id="saveAgentBtn">💾 保存智能体</button>
-                <button onclick="downloadModelfile()" style="flex: 1; background: #374151;">📥 下载 Modelfile</button>
-            </div>
-            <div id="agentStatus" style="margin-top: 10px;"></div>
-            
-            <div id="manualCreateHint" style="display: none; margin-top: 15px; padding: 15px; background: #1f2937; border-radius: 6px; border-left: 3px solid #f59e0b;">
-                <div style="color: #f59e0b; font-size: 13px; margin-bottom: 10px;">💡 手动创建方式（更可靠）</div>
-                <div style="font-size: 12px; color: #e0e0e0; line-height: 1.6;">
-                    <div style="margin-bottom: 8px;">1. 点击"下载 Modelfile"按钮</div>
-                    <div style="margin-bottom: 8px;">2. 在终端执行以下命令：</div>
-                    <div style="background: #374151; padding: 10px; border-radius: 4px; font-family: monospace; color: #10b981; font-size: 11px; margin-bottom: 8px; position: relative;">
-                        <div id="createCommand" style="overflow-x: auto; white-space: nowrap;">ollama create 模型名 -f ~/Downloads/Modelfile</div>
-                        <button onclick="copyCommand('createCommand')" style="position: absolute; right: 8px; top: 8px; padding: 4px 8px; background: #2563eb; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">复制</button>
-                    </div>
-                    <div style="font-size: 11px; color: #9ca3af;">3. 刷新页面查看新创建的智能体</div>
-                </div>
+            <div style="padding: 20px; border-top: 1px solid var(--border-color); display: flex; gap: 12px;">
+                <button onclick="saveAgent()" class="primary" style="flex: 2;">保存并创建</button>
+                <button onclick="downloadModelfile()" style="flex: 1; background: var(--bg-card); color: var(--text-secondary);">仅下载 Modelfile</button>
             </div>
         </div>
     </div>
