@@ -752,12 +752,14 @@ async function deleteAgent(agent) {
             body: JSON.stringify({ name: agent.modelName })
         });
 
+        // 如果删除的是当前正在使用的智能体：返回首页时不要再把历史写回去
+        if (currentAgent && currentAgent.modelName === agent.modelName) {
+            window.backToHome(true); // skipSaveHistory=true
+        }
+
         // 删除智能体后，同名重建不应继承旧的本地数据（聊天记录/配置）
         clearAgentLocalData(agent.modelName);
-        
-        if (currentAgent && currentAgent.name === agent.name) {
-            window.backToHome();
-        }
+
         showToast('已删除', 'success');
         loadModels();
     } catch(e) {
@@ -933,8 +935,8 @@ function renderPlazaAgents() {
     });
 }
 
-window.backToHome = function() {
-    if (currentAgent) saveChatHistory();
+window.backToHome = function(skipSaveHistory = false) {
+    if (currentAgent && !skipSaveHistory) saveChatHistory();
     currentAgent = null;
     const welcome = document.getElementById('welcomeScreen');
     if (welcome) welcome.style.display = 'flex';
