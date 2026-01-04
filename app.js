@@ -9,6 +9,95 @@ let baseModels = [];
 let editingAgent = null; 
 let isPulling = false; 
 
+// ==========================================
+// 工具函数：模型名归一化 / 配置读写 / Modelfile 解析
+// ==========================================
+function getModelNameAliases(name) {
+    const aliases = new Set();
+    if (!name) return [];
+    aliases.add(name);
+    if (name.endsWith(':latest')) aliases.add(name.slice(0, -':latest'.length));
+    if (!name.includes(':')) aliases.add(`${name}:latest`);
+    return Array.from(aliases);
+}
+
+function getAgentConfig(modelName) {
+    for (const keyName of getModelNameAliases(modelName)) {
+        const raw = localStorage.getItem(`agent_config_${keyName}`);
+        if (!raw) continue;
+        try { return JSON.parse(raw); } catch (_) {}
+    }
+    return null;
+}
+
+function setAgentConfig(modelName, configObj) {
+    for (const keyName of getModelNameAliases(modelName)) {
+        localStorage.setItem(`agent_config_${keyName}`, JSON.stringify(configObj));
+    }
+}
+
+function ensureSelectHasOption(selectEl, value) {
+    if (!selectEl || !value) return;
+    const exists = Array.from(selectEl.options || []).some(o => o.value === value);
+    if (!exists) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value;
+        selectEl.appendChild(opt);
+    }
+}
+
+function parseModelfile(modelfileText) {
+    const res = { from: '', system: '', parameters: {} };
+    if (typeof modelfileText !== 'string' || !modelfileText.trim()) return res;
+
+    const lines = modelfileText.split('\n');
+    const fromLine = lines.find(l => l.trim().toUpperCase().startsWith('FROM '));
+    if (fromLine) res.from = fromLine.trim().slice(5).trim();
+
+    // SYSTEM """ ... """
+    const sysTriple = modelfileText.match(/SYSTEM\s+"""\s*([\s\S]*?)\s*"""/m);
+    if (sysTriple && sysTriple[1] != null) {
+        res.system = sysTriple[1];
+    } else {
+        // SYSTEM "..."
+        const sysSingle = modelfileText.match(/SYSTEM\s+"([\s\S]*?)"/m);
+        if (sysSingle && sysSingle[1] != null) res.system = sysSingle[1];
+    }
+
+    for (const l of lines) {
+        const m = l.match(/^\s*PARAMETER\s+(\S+)\s+(.+?)\s*$/i);
+        if (!m) continue;
+        const k = m[1];
+        const vRaw = m[2];
+        const vNum = Number(vRaw);
+        res.parameters[k] = Number.isFinite(vNum) ? vNum : vRaw;
+    }
+    return res;
+}
+
+function clearAgentLocalData(modelName) {
+    for (const keyName of getModelNameAliases(modelName)) {
+        localStorage.removeItem(`chat_${keyName}`);
+        localStorage.removeItem(`agent_config_${keyName}`);
+    }
+    // 兼容历史上可能保存的 lastAgent / recentAgents 指向已删除模型
+    try {
+        const last = JSON.parse(localStorage.getItem('lastAgent') || 'null');
+        if (last && getModelNameAliases(modelName).includes(last.modelName)) {
+            localStorage.removeItem('lastAgent');
+        }
+    } catch (_) {}
+    try {
+        const recent = JSON.parse(localStorage.getItem('recentAgents') || '[]');
+        if (Array.isArray(recent)) {
+            const aliases = new Set(getModelNameAliases(modelName));
+            const filtered = recent.filter(a => !aliases.has(a.modelName));
+            localStorage.setItem('recentAgents', JSON.stringify(filtered));
+        }
+    } catch (_) {}
+}
+
 // 将 UI 控制函数挂载到 window，确保第一时间可用
 window.toggleManagePanel = function() {
     const panel = document.getElementById('managePanel');
@@ -417,32 +506,99 @@ async function editAgent(agent) {
     const nameInput = document.getElementById('agentName');
     if (nameInput) nameInput.value = agent.displayName;
     
-    // 尝试加载配置
-    const savedConfig = localStorage.getItem(`agent_config_${agent.modelName}`);
-    if (savedConfig) {
-        try {
-            const config = JSON.parse(savedConfig);
-            const modelSelect = document.getElementById('baseModelSelect');
-            const prompt = document.getElementById('systemPrompt');
-            
-            if (modelSelect) modelSelect.value = config.baseModel || '';
-            if (prompt) prompt.value = config.systemPrompt || '';
-            
-            if (config.parameters) {
-                const p = config.parameters;
-                if (p.temp) { document.getElementById('temperature').value = p.temp; updateParamValue('temp', p.temp); }
-                if (p.topp) { document.getElementById('top_p').value = p.topp; updateParamValue('topp', p.topp); }
-                // ... 可以继续补充其他参数的恢复
-            }
-            const editor = document.getElementById('agentEditor');
-            if (editor) editor.style.display = 'flex';
-            return;
-        } catch(e) {}
+    const modelSelect = document.getElementById('baseModelSelect');
+    const prompt = document.getElementById('systemPrompt');
+
+    // 1) 优先从本地缓存读取（同时兼容 name / name:latest）
+    const config = getAgentConfig(agent.modelName);
+    if (config) {
+        if (modelSelect) {
+            ensureSelectHasOption(modelSelect, config.baseModel);
+            modelSelect.value = config.baseModel || '';
+        }
+        if (prompt) prompt.value = config.systemPrompt || '';
+
+        if (config.parameters) {
+            const p = config.parameters;
+            // 兼容旧版保存字段（temp/topp/topk/repeat/numCtx/seed）与新版字段（temperature/top_p/top_k/repeat_penalty/num_ctx/seed）
+            const temperature = (p.temperature ?? p.temp);
+            const topP = (p.top_p ?? p.topp);
+            const topK = (p.top_k ?? p.topk);
+            const repeatPenalty = (p.repeat_penalty ?? p.repeat);
+            const numCtx = (p.num_ctx ?? p.numCtx);
+            const seed = (p.seed);
+
+            if (temperature != null) { document.getElementById('temperature').value = temperature; updateParamValue('temp', temperature); }
+            if (topP != null) { document.getElementById('top_p').value = topP; updateParamValue('topp', topP); }
+            if (topK != null) { document.getElementById('top_k').value = topK; updateParamValue('topk', topK); }
+            if (repeatPenalty != null) { document.getElementById('repeat_penalty').value = repeatPenalty; updateParamValue('repeat', repeatPenalty); }
+            if (numCtx != null) { document.getElementById('num_ctx').value = numCtx; updateParamValue('ctx', numCtx); }
+            if (seed != null) { document.getElementById('seed').value = seed; updateParamValue('seed', seed); }
+        }
+    }
+
+    // 2) 缓存缺失或不完整：从 Ollama 拉取详情解析（FROM / SYSTEM / PARAMETER）
+    let inferredFrom = '';
+    let inferredSystem = '';
+    let inferredParams = {};
+    try {
+        const showResp = await fetch(`${API_BASE}/api/show`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: agent.modelName })
+        });
+        if (showResp.ok) {
+            const showData = await showResp.json();
+            const parsed = parseModelfile(showData?.modelfile || '');
+            inferredFrom = parsed.from || '';
+            inferredSystem = parsed.system || '';
+            inferredParams = parsed.parameters || {};
+        }
+    } catch (_) {}
+
+    if (modelSelect && (!modelSelect.value || modelSelect.value === '')) {
+        const v = inferredFrom || agent.baseModel || '';
+        if (v) {
+            ensureSelectHasOption(modelSelect, v);
+            modelSelect.value = v;
+        }
+    }
+    if (prompt && (!prompt.value || prompt.value.trim() === '') && inferredSystem) {
+        prompt.value = inferredSystem;
+    }
+    if (inferredParams && Object.keys(inferredParams).length > 0) {
+        // 尝试回填部分参数（仅在用户未通过缓存回填过时）
+        const maybeSet = (id, uiKey, val) => {
+            const el = document.getElementById(id);
+            if (!el || val == null || Number.isNaN(val)) return;
+            if (el.value == null || el.value === '') el.value = val;
+            updateParamValue(uiKey, val);
+        };
+        maybeSet('temperature', 'temp', inferredParams.temperature);
+        maybeSet('top_p', 'topp', inferredParams.top_p);
+        maybeSet('top_k', 'topk', inferredParams.top_k);
+        maybeSet('repeat_penalty', 'repeat', inferredParams.repeat_penalty);
+        maybeSet('num_ctx', 'ctx', inferredParams.num_ctx);
+        if (inferredParams.seed != null) maybeSet('seed', 'seed', inferredParams.seed);
+    }
+
+    // 3) 将推断出的信息写回缓存，确保下次编辑必定可用
+    if (!config && (inferredFrom || inferredSystem)) {
+        setAgentConfig(agent.modelName, {
+            modelName: agent.modelName,
+            displayName: agent.displayName,
+            baseModel: inferredFrom || agent.baseModel || '',
+            systemPrompt: inferredSystem || '',
+            parameters: inferredParams || {}
+        });
     }
     
     if (agent.baseModel) {
-        const modelSelect = document.getElementById('baseModelSelect');
-        if (modelSelect) modelSelect.value = agent.baseModel;
+        // 仅当上面仍无法推断时，才用原有启发式值兜底
+        if (modelSelect && (!modelSelect.value || modelSelect.value === '')) {
+            ensureSelectHasOption(modelSelect, agent.baseModel);
+            modelSelect.value = agent.baseModel;
+        }
     }
     
     const editor = document.getElementById('agentEditor');
@@ -459,26 +615,40 @@ window.saveAgent = async function() {
         showToast('请填写名称并选择底座模型', 'warning');
         return;
     }
+
+    // 校验名称：仅在“创建”时校验。编辑时模型名来自 editingAgent.modelName（可能包含 :latest）
+    if (!editingAgent) {
+        if (/[\u4e00-\u9fa5]/.test(displayName)) {
+            showToast('名称不支持中文，请使用英文/数字命名', 'warning');
+            return;
+        }
+        // 允许常见 Ollama 名称形式：namespace/model:tag
+        if (!/^[a-zA-Z0-9._\/-]+(:[a-zA-Z0-9._-]+)?$/.test(displayName)) {
+            showToast('名称仅支持英文、数字、点(.)、下划线(_)、横杠(-)、斜杠(/) 和可选的 :tag', 'warning');
+            return;
+        }
+    }
     
+    // 统一为 Ollama 参数命名（与 Modelfile 的 PARAMETER key 一致）
     const params = {
-        temp: document.getElementById('temperature').value,
-        topp: document.getElementById('top_p').value,
-        topk: document.getElementById('top_k').value,
-        repeat: document.getElementById('repeat_penalty').value,
-        numCtx: document.getElementById('num_ctx').value,
-        seed: document.getElementById('seed').value
+        temperature: parseFloat(document.getElementById('temperature').value),
+        top_p: parseFloat(document.getElementById('top_p').value),
+        top_k: parseInt(document.getElementById('top_k').value, 10),
+        repeat_penalty: parseFloat(document.getElementById('repeat_penalty').value),
+        num_ctx: parseInt(document.getElementById('num_ctx').value, 10),
+        seed: parseInt(document.getElementById('seed').value, 10)
     };
     
     // 生成模型名
-    let modelName = editingAgent ? editingAgent.modelName : displayName.toLowerCase().replace(/[^a-z0-9-_]/g, '-');
-    if (!modelName || modelName === '-') modelName = 'agent-' + Date.now();
+    let modelName = editingAgent ? editingAgent.modelName : displayName.toLowerCase();
     
+    // 兼容回退用：如果后端不支持 parameters 直传，则用 files.Modelfile 方式创建
     const modelfile = `FROM ${baseModel}
-PARAMETER temperature ${params.temp}
-PARAMETER top_p ${params.topp}
-PARAMETER top_k ${params.topk}
-PARAMETER repeat_penalty ${params.repeat}
-PARAMETER num_ctx ${params.numCtx}
+PARAMETER temperature ${params.temperature}
+PARAMETER top_p ${params.top_p}
+PARAMETER top_k ${params.top_k}
+PARAMETER repeat_penalty ${params.repeat_penalty}
+PARAMETER num_ctx ${params.num_ctx}
 PARAMETER seed ${params.seed}
 SYSTEM """
 ${systemPrompt || '你是一个友好的AI助手。'}
@@ -491,20 +661,53 @@ ${systemPrompt || '你是一个友好的AI助手。'}
         if (editingAgent) {
             await fetch(`${API_BASE}/api/delete`, {
                 method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: editingAgent.modelName })
             });
         }
         
-        const response = await fetch(`${API_BASE}/api/create`, {
+        // 优先走“参数直传”：from + system + parameters
+        let response = await fetch(`${API_BASE}/api/create`, {
             method: 'POST',
-            body: JSON.stringify({ name: modelName, modelfile: modelfile, stream: false })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: modelName,
+                from: baseModel,
+                system: systemPrompt || '你是一个友好的AI助手。',
+                parameters: params,
+                stream: false
+            })
         });
+
+        // 回退：如果后端返回 “neither 'from' or 'files'...” 或者不识别 parameters，就改用 files.Modelfile
+        if (!response.ok) {
+            const errText = await response.text();
+            const shouldFallback =
+                errText.includes("neither 'from' or 'files'") ||
+                errText.includes('unknown field') ||
+                errText.includes('invalid');
+
+            if (shouldFallback) {
+                response = await fetch(`${API_BASE}/api/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: modelName,
+                        from: baseModel,
+                        files: { Modelfile: modelfile },
+                        stream: false
+                    })
+                });
+            } else {
+                // 保留原错误信息
+                throw new Error(errText);
+            }
+        }
         
         if (!response.ok) throw new Error(await response.text());
         
-        localStorage.setItem(`agent_config_${modelName}`, JSON.stringify({
-            modelName, displayName, baseModel, systemPrompt, parameters: params
-        }));
+        // 缓存配置：同时兼容 name / name:latest 这两种 key（避免编辑时找不到）
+        setAgentConfig(modelName, { modelName, displayName, baseModel, systemPrompt, parameters: params });
         
         if (statusDiv) statusDiv.innerHTML = '<span style="color:#10b981">✓ 创建成功</span>';
         showToast('智能体创建成功', 'success');
@@ -530,6 +733,7 @@ window.deleteBaseModel = async function(modelName) {
     try {
         await fetch(`${API_BASE}/api/delete`, {
             method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: modelName })
         });
         showToast('已删除', 'success');
@@ -544,8 +748,12 @@ async function deleteAgent(agent) {
     try {
         await fetch(`${API_BASE}/api/delete`, {
             method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: agent.modelName })
         });
+
+        // 删除智能体后，同名重建不应继承旧的本地数据（聊天记录/配置）
+        clearAgentLocalData(agent.modelName);
         
         if (currentAgent && currentAgent.name === agent.name) {
             window.backToHome();
@@ -576,6 +784,7 @@ window.sendMessage = async function() {
     try {
         const response = await fetch(`${API_BASE}/api/chat`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: currentAgent.modelName,
                 messages: messages,
@@ -768,6 +977,7 @@ window.pullModel = async function() {
     try {
         const response = await fetch(`${API_BASE}/api/pull`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name, stream: true })
         });
         
@@ -840,12 +1050,49 @@ window.insertTemplate = function() {
 window.downloadModelfile = function() {
     const displayName = document.getElementById('agentName').value.trim();
     const baseModel = document.getElementById('baseModelSelect').value;
+    const systemPrompt = document.getElementById('systemPrompt').value.trim();
     
     if (!displayName || !baseModel) {
         showToast('请填写名称并选择底座模型', 'warning');
         return;
     }
-    showToast('功能暂未完全实现（纯前端模拟）');
+
+    const params = {
+        temp: document.getElementById('temperature').value,
+        topp: document.getElementById('top_p').value,
+        topk: document.getElementById('top_k').value,
+        repeat: document.getElementById('repeat_penalty').value,
+        numCtx: document.getElementById('num_ctx').value,
+        seed: document.getElementById('seed').value
+    };
+    
+    const modelfile = `FROM ${baseModel}
+PARAMETER temperature ${params.temp}
+PARAMETER top_p ${params.topp}
+PARAMETER top_k ${params.topk}
+PARAMETER repeat_penalty ${params.repeat}
+PARAMETER num_ctx ${params.numCtx}
+PARAMETER seed ${params.seed}
+SYSTEM """
+${systemPrompt || '你是一个友好的AI助手。'}
+"""`;
+
+    try {
+        const blob = new Blob([modelfile], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Modelfile';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('Modelfile 已下载', 'success');
+    } catch (e) {
+        console.error('下载失败:', e);
+        showToast('下载失败', 'error');
+    }
 };
 
 // 历史记录保存与加载

@@ -312,6 +312,63 @@ button.primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
     color: var(--text-primary);
 }
 
+/* 欢迎页 Grid 布局 */
+.welcome-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-bottom: 40px;
+}
+
+@media (max-width: 600px) {
+    .welcome-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.welcome-card {
+    padding: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    text-align: left;
+    transition: var(--transition-smooth);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: 100%;
+}
+
+.welcome-card:hover {
+    border-color: rgba(37,99,235,0.5);
+    transform: translateY(-2px);
+}
+
+.welcome-card .card-icon {
+    width: 36px;
+    height: 36px;
+    background: rgba(37,99,235,0.1);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    color: #3b82f6;
+}
+
+.welcome-card .card-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.welcome-card .card-desc {
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
 /* 欢迎页卡片 */
 .welcome-tab-content { padding: 40px 20px; }
 .plaza-agent-card {
@@ -408,6 +465,26 @@ input:focus, select:focus, textarea:focus {
     background: transparent;
     padding: 8px;
     font-size: 20px;
+}
+
+/* 移动端遮罩层 */
+.mobile-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 95;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-smooth);
+}
+
+.mobile-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* 移动端适配 */

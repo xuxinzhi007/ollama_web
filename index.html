@@ -118,21 +118,21 @@
                     
                         <div id="recentAgents" style="margin-bottom: 30px;"></div>
                         
-                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 40px;">
-                            <button onclick="createNewAgent()" style="padding: 24px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); text-align: left; transition: var(--transition-smooth);" onmouseover="this.style.borderColor='rgba(37,99,235,0.5)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
-                                <div style="width: 40px; height: 40px; background: rgba(37,99,235,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; color: #3b82f6;">
+                        <div class="welcome-grid">
+                            <button onclick="createNewAgent()" class="welcome-card">
+                                <div class="card-icon">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                                 </div>
-                                <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px; color: var(--text-primary);">创建新智能体</div>
-                                <div style="font-size: 13px; color: var(--text-tertiary);">自定义角色、参数和提示词</div>
+                                <div class="card-title">创建新智能体</div>
+                                <div class="card-desc">自定义角色、参数和提示词</div>
                             </button>
                             
-                            <button onclick="toggleManagePanel()" style="padding: 24px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); text-align: left; transition: var(--transition-smooth);" onmouseover="this.style.borderColor='rgba(37,99,235,0.5)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
-                                <div style="width: 40px; height: 40px; background: rgba(37,99,235,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; color: #3b82f6;">
+                            <button onclick="toggleManagePanel()" class="welcome-card">
+                                <div class="card-icon">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                                 </div>
-                                <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px; color: var(--text-primary);">管理模型库</div>
-                                <div style="font-size: 13px; color: var(--text-tertiary);">拉取、删除和管理底座模型</div>
+                                <div class="card-title">管理模型库</div>
+                                <div class="card-desc">拉取、删除和管理底座模型</div>
                             </button>
                         </div>
                     </div>
