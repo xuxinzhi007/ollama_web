@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# 🚀 统一LoRA训练启动脚本
+# 用法：
+#   ./train                    # 交互式选择角色
+#   ./train linzhi             # 直接训练指定角色
+#   ./train --menu             # 显示完整菜单（推荐）
+#   ./train --list             # 列出所有配置
+#   ./train --scan             # 扫描数据集
+#   ./train --cache            # 检查模型缓存状态
+#   ./train linzhi --ollama    # 训练并导出到Ollama
+#   ./train linzhi --ollama_name "my-model"  # 指定Ollama模型名
+
+cd "$(dirname "$0")"
+
+# 激活虚拟环境（如果存在）
+if [ -d ".venv" ]; then
+    source .venv/bin/activate
+fi
+
+# 运行智能训练脚本
+python smart_train.py "$@"

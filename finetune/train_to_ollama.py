@@ -12,6 +12,7 @@ import tempfile
 import json
 import time
 import threading
+from config_manager import ConfigManager
 
 
 def run_command(cmd: str, check: bool = True) -> tuple[int, str]:
@@ -85,16 +86,43 @@ def run_command_realtime(cmd: str) -> int:
 
 
 def check_dataset():
-    """检查和显示数据集信息"""
+    """检查和显示数据集信息（支持新的datasets目录结构）"""
     print("📊 检查训练数据...")
 
-    train_file = Path("data/train.jsonl")
-    val_file = Path("data/val.jsonl")
+    # 优先检查新的datasets目录结构
+    datasets_dir = Path("datasets")
+    train_file = None
+    val_file = None
 
-    if not train_file.exists():
-        print("❌ 训练数据不存在: data/train.jsonl")
-        print("💡 请运行: python make_dataset.py --out_dir data --n 300")
-        return False
+    if datasets_dir.exists():
+        # 扫描datasets目录找到可用的数据
+        for char_dir in datasets_dir.iterdir():
+            if char_dir.is_dir() and char_dir.name != 'archive':
+                # 查找训练文件
+                train_files = list(char_dir.glob("*train*.jsonl"))
+                val_files = list(char_dir.glob("*val*.jsonl"))
+
+                if train_files:
+                    # 选择最大的训练文件
+                    train_file = max(train_files, key=lambda f: f.stat().st_size)
+                    print(f"🎯 找到训练数据: {train_file}")
+
+                    if val_files:
+                        val_file = val_files[0]
+                        print(f"🎯 找到验证数据: {val_file}")
+                    break
+
+    # 回退到旧的data目录
+    if not train_file:
+        train_file = Path("data/train.jsonl")
+        val_file = Path("data/val.jsonl")
+
+        if not train_file.exists():
+            print("❌ 训练数据不存在")
+            print("💡 建议:")
+            print("   1. 将数据放在 datasets/角色名/ 目录下")
+            print("   2. 或运行: python make_dataset.py --out_dir data --n 300")
+            return False
 
     # 统计数据行数
     try:
@@ -140,11 +168,11 @@ def check_dataset():
                 system_prompt = first_msg.get('content', '')[:100]
                 print(f"   🎯 训练目标: {system_prompt}{'...' if len(first_msg.get('content', '')) > 100 else ''}")
 
-        return True
+        return train_file, val_file
 
     except Exception as e:
         print(f"❌ 读取数据失败: {e}")
-        return False
+        return None, None
 
 
 def check_environment():
@@ -217,17 +245,21 @@ def show_training_info(model_name: str, epochs: float, ollama_name: str, data_in
     print("   5️⃣ 导入Ollama ⏳")
 
 
-def train_lora(model_name: str, epochs: float, output_dir: str, merged_dir: str):
+def train_lora(model_name: str, epochs: float, output_dir: str, merged_dir: str, train_file: Path, val_file: Path = None):
     """训练 LoRA"""
     print(f"\n🚀 开始 LoRA 微调训练...")
     print(f"⏰ 开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     cmd = f"""python train_lora.py \\
         --model_name_or_path "{model_name}" \\
+        --train_jsonl "{train_file}" \\
         --output_dir "{output_dir}" \\
         --merged_dir "{merged_dir}" \\
         --num_train_epochs {epochs} \\
         --merge_and_save"""
+
+    if val_file and val_file.exists():
+        cmd += f' --val_jsonl "{val_file}"'
 
     print(f"\n💡 提示: 训练过程中可以看到实时进度，进度条会在同一行更新")
     print("📊 如果看到类似 '🔄 85%|████████▌ | 57/68 [01:37<00:16, 1.53s/it]' 说明正常运行\n")
@@ -302,7 +334,7 @@ def save_training_info(merged_dir: str, model_name: str, epochs: float):
     print(f"💾 训练信息已保存到: {info_path}")
 
 
-def create_modelfile_for_ollama(merged_dir: Path, model_name: str) -> str:
+def create_modelfile_for_ollama(merged_dir: Path, model_name: str, config: ConfigManager = None) -> str:
     """为 Ollama 创建 Modelfile"""
 
     # 读取保存的训练信息
@@ -320,19 +352,34 @@ def create_modelfile_for_ollama(merged_dir: Path, model_name: str) -> str:
     else:
         print(f"⚠️  未找到训练信息文件，使用默认系统提示")
 
+    # 使用配置文件中的 Ollama 参数，或使用默认值
+    if config:
+        params = config.get_ollama_params()
+        base_model = config.get("model.base_model", "Qwen2.5-0.5B-Instruct")
+        print(f"📋 使用配置文件中的 Ollama 参数")
+    else:
+        params = {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 40,
+            "repeat_penalty": 1.05,
+            "num_ctx": 4096
+        }
+        base_model = "Qwen2.5-0.5B-Instruct"
+
     modelfile_content = f"""# LoRA 微调模型: {model_name}
-# 基于 Qwen2.5-0.5B-Instruct
+# 基于 {base_model}
 
 FROM {merged_dir.absolute()}
 
-# 基础参数
-PARAMETER temperature 0.7
-PARAMETER top_p 0.9
-PARAMETER top_k 40
-PARAMETER repeat_penalty 1.05
+# 基础参数 - 从配置文件读取
+PARAMETER temperature {params['temperature']}
+PARAMETER top_p {params['top_p']}
+PARAMETER top_k {params['top_k']}
+PARAMETER repeat_penalty {params['repeat_penalty']}
 
 # 上下文长度
-PARAMETER num_ctx 4096
+PARAMETER num_ctx {params['num_ctx']}
 
 # 系统提示 - 从训练时保存的信息中读取
 SYSTEM \"\"\"{system_prompt}\"\"\"
@@ -341,7 +388,7 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
     return modelfile_content
 
 
-def import_to_ollama(merged_dir: str, ollama_model_name: str) -> bool:
+def import_to_ollama(merged_dir: str, ollama_model_name: str, config: ConfigManager = None) -> bool:
     """导入到 Ollama"""
     print(f"\n📦 导入模型到 Ollama: {ollama_model_name}")
 
@@ -351,7 +398,7 @@ def import_to_ollama(merged_dir: str, ollama_model_name: str) -> bool:
         return False
 
     # 创建标准的 Modelfile
-    modelfile_content = create_modelfile_for_ollama(merged_path, ollama_model_name)
+    modelfile_content = create_modelfile_for_ollama(merged_path, ollama_model_name, config)
     # Ollama 标准格式：必须叫 Modelfile
     modelfile_path = merged_path / "Modelfile"
 
@@ -394,11 +441,15 @@ def import_to_ollama(merged_dir: str, ollama_model_name: str) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="一键式 LoRA 训练到 Ollama 导入")
 
-    # 训练参数
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct",
-                       help="基础模型")
-    parser.add_argument("--epochs", type=float, default=2.0,
-                       help="训练轮次")
+    # 配置文件参数
+    parser.add_argument("--config", type=str, default="config.yaml",
+                       help="配置文件路径")
+
+    # 训练参数 (会覆盖配置文件)
+    parser.add_argument("--model", type=str, default=None,
+                       help="基础模型 (覆盖配置文件)")
+    parser.add_argument("--epochs", type=float, default=None,
+                       help="训练轮次 (覆盖配置文件)")
     parser.add_argument("--ollama_name", type=str, required=True,
                        help="在 Ollama 中的模型名称")
 
@@ -413,8 +464,18 @@ def main():
                        help="跳过训练，直接导入已有模型")
     parser.add_argument("--force", action="store_true",
                        help="强制覆盖已存在的 Ollama 模型")
+    parser.add_argument("--continue_train", action="store_true",
+                       help="继续训练已存在的模型（提供交互选项）")
 
     args = parser.parse_args()
+
+    # 加载配置
+    config = ConfigManager(args.config)
+    config.show_config()
+
+    # 使用命令行参数覆盖配置文件
+    final_model = args.model if args.model else config.get("model.base_model")
+    final_epochs = args.epochs if args.epochs else config.get("training.epochs")
 
     # 自动生成每个模型的独立目录
     if args.lora_dir is None:
@@ -428,6 +489,8 @@ def main():
 
     print("🎯 一键式 LoRA 训练到 Ollama 导入")
     print("=" * 50)
+    print(f"🤖 使用模型: {final_model}")
+    print(f"🔄 训练轮数: {final_epochs}")
     print(f"📂 LoRA 目录: {args.lora_dir}")
     print(f"📂 合并目录: {args.merged_dir}")
     print("=" * 50)
@@ -437,17 +500,102 @@ def main():
         sys.exit(1)
 
     # 检查并显示数据集信息
+    train_file = None
+    val_file = None
     if not args.skip_train:
-        if not check_dataset():
+        train_file, val_file = check_dataset()
+        if not train_file:
             sys.exit(1)
 
     # 检查模型是否已存在
-    if not args.force:
-        ret, _ = run_command(f"ollama list | grep {args.ollama_name}", check=False)
-        if ret == 0:
+    model_exists = False
+    ret, _ = run_command(f"ollama list | grep {args.ollama_name}", check=False)
+    if ret == 0:
+        model_exists = True
+
+        if not args.force and not args.continue_train and not args.skip_train:
             print(f"⚠️  模型 '{args.ollama_name}' 已存在")
-            print("💡 使用 --force 强制覆盖，或 --skip_train 跳过训练")
-            sys.exit(1)
+            print("\n📋 继续训练选项:")
+            print("1) 🔄 继续训练 (增加轮次/调整参数)")
+            print("2) 🗑️  强制覆盖 (删除重训)")
+            print("3) ⏭️  跳过训练 (直接使用现有模型)")
+            print("4) ❌ 取消操作")
+
+            while True:
+                choice = input("\n请选择 (1-4): ").strip()
+                if choice == "1":
+                    args.continue_train = True
+                    break
+                elif choice == "2":
+                    args.force = True
+                    break
+                elif choice == "3":
+                    args.skip_train = True
+                    break
+                elif choice == "4":
+                    print("操作已取消")
+                    sys.exit(0)
+                else:
+                    print("❌ 无效选择，请输入1-4")
+
+    # 处理继续训练逻辑
+    if args.continue_train and model_exists:
+        print(f"\n🔄 继续训练模型: {args.ollama_name}")
+        print("📋 继续训练方式:")
+        print("1) 📈 增量训练 (在当前基础上增加训练轮次)")
+        print("2) ⚙️  调参重训 (修改学习率/LoRA参数重新训练)")
+        print("3) 📊 数据增强 (使用当前数据集重新训练更多轮次)")
+        print("4) 🔧 自定义配置 (完全自定义参数)")
+
+        while True:
+            train_choice = input("\n选择继续训练方式 (1-4): ").strip()
+            if train_choice in ["1", "2", "3", "4"]:
+                break
+            print("❌ 无效选择，请输入1-4")
+
+        if train_choice == "1":
+            # 增量训练
+            additional_epochs = float(input("增加多少训练轮次? (推荐1.0-3.0): ") or "1.0")
+            final_epochs = final_epochs + additional_epochs
+            print(f"✅ 将在现有基础上增加 {additional_epochs} 轮训练")
+
+        elif train_choice == "2":
+            # 调参重训
+            print("⚙️  参数调整选项:")
+            new_lr = input(f"学习率 (当前: {config.get('training.learning_rate', '2e-4')}, 回车保持): ")
+            if new_lr:
+                config.config['training']['learning_rate'] = float(new_lr)
+
+            new_rank = input(f"LoRA rank (当前: {config.get('lora.rank', 8)}, 回车保持): ")
+            if new_rank:
+                config.config['lora']['rank'] = int(new_rank)
+                config.config['lora']['alpha'] = int(new_rank) * 2  # alpha通常是rank的2倍
+
+            additional_epochs = float(input("训练轮次 (推荐2.0-4.0): ") or "2.0")
+            final_epochs = additional_epochs
+            print("✅ 将使用新参数重新训练")
+
+        elif train_choice == "3":
+            # 数据增强训练
+            additional_epochs = float(input("总训练轮次 (推荐3.0-6.0): ") or "3.0")
+            final_epochs = additional_epochs
+            print("✅ 将使用当前数据集进行深度训练")
+
+        elif train_choice == "4":
+            # 自定义配置
+            print("🔧 完全自定义训练配置:")
+            custom_epochs = input("训练轮次: ") or str(final_epochs)
+            custom_lr = input("学习率: ") or str(config.get('training.learning_rate'))
+            custom_rank = input("LoRA rank: ") or str(config.get('lora.rank'))
+
+            final_epochs = float(custom_epochs)
+            config.config['training']['learning_rate'] = float(custom_lr)
+            config.config['lora']['rank'] = int(custom_rank)
+            config.config['lora']['alpha'] = int(custom_rank) * 2
+            print("✅ 自定义配置已设置")
+
+        # 继续训练时强制覆盖
+        args.force = True
 
     try:
         # 准备数据集信息用于显示
@@ -467,15 +615,17 @@ def main():
 
         # 显示训练概览
         if not args.skip_train:
-            show_training_info(args.model, args.epochs, args.ollama_name, data_info)
+            show_training_info(final_model, final_epochs, args.ollama_name, data_info)
 
         # 步骤 1: 训练（如果需要）
         if not args.skip_train:
             success = train_lora(
-                model_name=args.model,
-                epochs=args.epochs,
+                model_name=final_model,
+                epochs=final_epochs,
                 output_dir=args.lora_dir,
-                merged_dir=args.merged_dir
+                merged_dir=args.merged_dir,
+                train_file=train_file,
+                val_file=val_file
             )
             if not success:
                 sys.exit(1)
@@ -483,7 +633,7 @@ def main():
             print("⏭️  跳过训练，使用现有模型")
 
         # 步骤 2: 导入到 Ollama
-        success = import_to_ollama(args.merged_dir, args.ollama_name)
+        success = import_to_ollama(args.merged_dir, args.ollama_name, config)
 
         if success:
             print(f"\n🎉 完成! 模型已导入为: {args.ollama_name}")

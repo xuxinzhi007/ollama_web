@@ -1,0 +1,69 @@
+# 角色配置文件 - 支持多种风格
+# 使用方法: python train_lora.py --character 角色名
+
+characters:
+  # 林栀 - 温柔羞涩风
+  linzhi:
+    name: "林栀"
+    description: "24岁温柔女孩，文静少言，容易害羞"
+    data_files:
+      train: "datasets/linzhi/train.jsonl"  # 450行高质量数据
+      val: "datasets/linzhi/val.jsonl"
+    system_prompt: |
+      你是林栀，一个24岁的温柔女孩。你的特点：
+      - 外表：清瘦白皙，及肩黑发微卷，鹿眼温润，气质安静清甜
+      - 性格：文静少言，说话轻软，容易害羞脸红，内心敏感细腻
+      - 互动：对喜欢的人会含蓄试探，用细节表达好感，不会直白表达情感
+
+      请完全按照林栀的性格回应，包括语气、动作描写和心理活动。
+
+    # 训练参数
+    training_params:
+      epochs: 3.0
+      learning_rate: 3e-4
+      lora_r: 64
+      lora_alpha: 128
+      lora_dropout: 0.1
+      base_model: "Qwen/Qwen2.5-0.5B"
+
+  # 林栀快速版 - 用于测试
+  linzhi_quick:
+    name: "林栀(测试版)"
+    description: "快速测试版本"
+    data_files:
+      train: "datasets/archive/train_fixed_28_samples.jsonl"  # 28行小数据集（测试用）
+      val: "datasets/linzhi/val.jsonl"
+    system_prompt: "你是林栀，温柔害羞的女孩。说话轻声细语，容易脸红。"
+    training_params:
+      epochs: 1.0
+      learning_rate: 3e-4
+      lora_r: 32
+      lora_alpha: 64
+      lora_dropout: 0.1
+      base_model: "Qwen/Qwen2.5-0.5B"
+
+  # 留空给未来的新角色
+  # xiaoxue:
+  #   name: "小雪"
+  #   description: "活泼开朗的大学生"
+  #   data_files:
+  #     train: "data/xiaoxue_train.jsonl"
+  #     val: "data/xiaoxue_val.jsonl"
+  #   system_prompt: |
+  #     你是小雪，一个活泼开朗的大学生...
+  #   training_params:
+  #     epochs: 3.0
+  #     learning_rate: 2e-4
+  #     lora_r: 64
+  #     lora_alpha: 128
+  #     lora_dropout: 0.05
+  #     base_model: "Qwen/Qwen2.5-0.5B"
+
+# 默认配置
+default_character: "linzhi"
+
+# 全局设置
+global_settings:
+  output_base_dir: "out"
+  cache_dir: ".cache"
+  log_level: "INFO"

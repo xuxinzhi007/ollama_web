@@ -1,0 +1,980 @@
+#!/usr/bin/env python3
+"""
+智能LoRA训练脚本 - 自动匹配数据文件，简化工作流程
+解决问题：
+1. 自动检测和匹配数据集文件
+2. 无需手动指定文件路径
+3. 智能处理缺失文件情况
+4. 提高测试效率
+
+使用方法：
+  python smart_train.py                    # 交互式选择角色
+  python smart_train.py --character linzhi # 直接指定角色
+  python smart_train.py --list             # 列出所有可用配置
+  python smart_train.py --scan             # 扫描数据集状态
+"""
+
+import os
+import sys
+import argparse
+import yaml
+import json
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+import subprocess
+import time
+
+class SmartTrainer:
+    def __init__(self):
+        self.root_dir = Path(__file__).parent
+        self.datasets_dir = self.root_dir / "datasets"
+        self.config_file = self.root_dir / "character_configs.yaml"
+        self.config = self._load_config()
+
+    def _load_config(self) -> Dict:
+        """加载角色配置"""
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except FileNotFoundError:
+            print(f"❌ 配置文件不存在: {self.config_file}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ 加载配置失败: {e}")
+            sys.exit(1)
+
+    def check_model_cache(self):
+        """检查模型缓存状态"""
+        try:
+            from model_cache import print_cache_status
+
+            print("\n🔍 检查模型缓存状态")
+            print("=" * 50)
+
+            # 检查配置中的所有模型
+            models_to_check = set()
+
+            for char_name, char_config in self.config.get('characters', {}).items():
+                training_params = char_config.get('training_params', {})
+                base_model = training_params.get('base_model', 'Qwen/Qwen2.5-0.5B')
+
+                # 标准化模型名称
+                if base_model == 'Qwen/Qwen2.5-0.5B':
+                    base_model = 'Qwen/Qwen2.5-0.5B-Instruct'
+
+                models_to_check.add(base_model)
+
+            # 如果没有配置，检查默认模型
+            if not models_to_check:
+                models_to_check.add('Qwen/Qwen2.5-0.5B-Instruct')
+
+            for model in models_to_check:
+                print_cache_status(model)
+                print()
+
+        except ImportError:
+            print("❌ 无法导入模型缓存检测模块")
+        except Exception as e:
+            print(f"❌ 检查缓存时出错: {e}")
+
+    def scan_datasets(self) -> Dict[str, Dict]:
+        """扫描数据集目录，自动发现可用的数据文件"""
+        print("🔍 扫描数据集...")
+
+        dataset_info = {}
+
+        if not self.datasets_dir.exists():
+            print(f"📁 数据集目录不存在: {self.datasets_dir}")
+            return dataset_info
+
+        # 扫描各个角色目录
+        for char_dir in self.datasets_dir.iterdir():
+            if not char_dir.is_dir() or char_dir.name == 'archive':
+                continue
+
+            char_name = char_dir.name
+            train_files = []
+            val_files = []
+
+            # 查找训练和验证文件
+            for file_path in char_dir.glob("*.jsonl"):
+                if "train" in file_path.name.lower():
+                    train_files.append(file_path)
+                elif "val" in file_path.name.lower():
+                    val_files.append(file_path)
+
+            if train_files or val_files:
+                dataset_info[char_name] = {
+                    'train_files': train_files,
+                    'val_files': val_files,
+                    'dir': char_dir
+                }
+
+        # 扫描archive目录中的历史数据
+        archive_dir = self.datasets_dir / "archive"
+        if archive_dir.exists():
+            archive_files = list(archive_dir.glob("*.jsonl"))
+            if archive_files:
+                dataset_info['archive'] = {
+                    'train_files': [f for f in archive_files if "train" in f.name.lower()],
+                    'val_files': [f for f in archive_files if "val" in f.name.lower()],
+                    'dir': archive_dir
+                }
+
+        return dataset_info
+
+    def count_samples(self, file_path: Path) -> int:
+        """统计JSONL文件中的样本数量"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return sum(1 for line in f if line.strip())
+        except:
+            return 0
+
+    def validate_jsonl(self, file_path: Path) -> Tuple[bool, str]:
+        """验证JSONL文件格式"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for i, line in enumerate(f):
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if 'messages' not in data:
+                            return False, f"第{i+1}行缺少'messages'字段"
+                        if not isinstance(data['messages'], list):
+                            return False, f"第{i+1}行'messages'不是数组"
+                    except json.JSONDecodeError as e:
+                        return False, f"第{i+1}行JSON格式错误: {e}"
+            return True, "格式正确"
+        except Exception as e:
+            return False, f"文件读取错误: {e}"
+
+    def list_configurations(self):
+        """列出所有可用的角色配置"""
+        print("\n📋 可用角色配置:")
+        print("=" * 50)
+
+        dataset_info = self.scan_datasets()
+
+        for char_name, char_config in self.config.get('characters', {}).items():
+            print(f"\n🎭 角色: {char_name}")
+            print(f"   名称: {char_config.get('name', 'N/A')}")
+            print(f"   描述: {char_config.get('description', 'N/A')}")
+
+            # 检查配置的数据文件是否存在
+            data_files = char_config.get('data_files', {})
+            train_file = data_files.get('train')
+            val_file = data_files.get('val')
+
+            print(f"   配置的训练文件: {train_file}")
+            print(f"   配置的验证文件: {val_file}")
+
+            # 检查实际文件状态
+            if char_name in dataset_info:
+                info = dataset_info[char_name]
+                print(f"   🔍 发现的训练文件: {len(info['train_files'])}个")
+                for tf in info['train_files']:
+                    count = self.count_samples(tf)
+                    print(f"      📄 {tf.name} ({count}样本)")
+
+                print(f"   🔍 发现的验证文件: {len(info['val_files'])}个")
+                for vf in info['val_files']:
+                    count = self.count_samples(vf)
+                    print(f"      📄 {vf.name} ({count}样本)")
+            else:
+                print(f"   ⚠️  未发现 {char_name} 的数据文件")
+
+        # 显示未配置的数据集
+        unconfigured = set(dataset_info.keys()) - set(self.config.get('characters', {}).keys())
+        if unconfigured:
+            print(f"\n📂 发现未配置的数据集:")
+            for char_name in unconfigured:
+                if char_name == 'archive':
+                    continue
+                info = dataset_info[char_name]
+                print(f"   📁 {char_name}/")
+                print(f"      训练文件: {len(info['train_files'])}个")
+                print(f"      验证文件: {len(info['val_files'])}个")
+
+    def auto_match_files(self, character: str) -> Tuple[Optional[str], Optional[str]]:
+        """自动匹配角色的训练和验证文件"""
+        dataset_info = self.scan_datasets()
+
+        # 首先检查配置文件中指定的路径
+        char_config = self.config.get('characters', {}).get(character)
+        if char_config:
+            data_files = char_config.get('data_files', {})
+            train_path = data_files.get('train')
+            val_path = data_files.get('val')
+
+            if train_path and val_path:
+                train_full = self.root_dir / train_path
+                val_full = self.root_dir / val_path
+
+                if train_full.exists() and val_full.exists():
+                    print(f"✅ 使用配置文件指定的数据:")
+                    print(f"   训练: {train_path} ({self.count_samples(train_full)}样本)")
+                    print(f"   验证: {val_path} ({self.count_samples(val_full)}样本)")
+                    return str(train_full), str(val_full)
+
+        # 如果配置文件路径不存在，尝试自动匹配
+        if character in dataset_info:
+            info = dataset_info[character]
+
+            # 选择最大的训练文件
+            train_file = None
+            if info['train_files']:
+                train_file = max(info['train_files'], key=lambda f: self.count_samples(f))
+
+            # 选择验证文件
+            val_file = None
+            if info['val_files']:
+                val_file = info['val_files'][0]  # 通常只有一个验证文件
+
+            if train_file and val_file:
+                print(f"🎯 自动匹配的数据文件:")
+                print(f"   训练: {train_file.name} ({self.count_samples(train_file)}样本)")
+                print(f"   验证: {val_file.name} ({self.count_samples(val_file)}样本)")
+                return str(train_file), str(val_file)
+
+            elif train_file:
+                print(f"⚠️  只找到训练文件: {train_file.name} ({self.count_samples(train_file)}样本)")
+                print(f"   缺少验证文件，可能影响训练效果")
+                return str(train_file), None
+
+        return None, None
+
+    def interactive_select(self) -> str:
+        """交互式选择角色"""
+        dataset_info = self.scan_datasets()
+        characters = list(self.config.get('characters', {}).keys())
+
+        print("\n🎭 请选择要训练的角色:")
+        print("=" * 40)
+
+        for i, char_name in enumerate(characters, 1):
+            char_config = self.config['characters'][char_name]
+            name = char_config.get('name', char_name)
+            desc = char_config.get('description', '无描述')
+
+            # 检查数据可用性（优先检查配置文件路径）
+            status = "❌ 无数据"
+
+            # 首先检查配置文件中指定的路径
+            char_config = self.config['characters'][char_name]
+            data_files = char_config.get('data_files', {})
+            train_path = data_files.get('train')
+            val_path = data_files.get('val')
+
+            train_count = 0
+            val_count = 0
+
+            # 优先检查配置文件指定的路径
+            config_files_exist = False
+            if train_path:
+                train_full = self.root_dir / train_path
+                if train_full.exists():
+                    train_count = self.count_samples(train_full)
+                    config_files_exist = True
+
+            if val_path:
+                val_full = self.root_dir / val_path
+                if val_full.exists():
+                    val_count = self.count_samples(val_full)
+
+            # 如果配置文件路径无效或不存在，再检查扫描结果
+            if not config_files_exist and char_name in dataset_info:
+                info = dataset_info[char_name]
+                if info['train_files']:
+                    train_count = sum(self.count_samples(f) for f in info['train_files'])
+                if info['val_files']:
+                    val_count = sum(self.count_samples(f) for f in info['val_files'])
+
+            if train_count > 0:
+                status = f"✅ {train_count}训练样本"
+                if val_count > 0:
+                    status += f", {val_count}验证样本"
+
+            print(f"{i:2d}. {name} - {desc}")
+            print(f"    {status}")
+
+        while True:
+            try:
+                choice = input(f"\n请输入选择 (1-{len(characters)}): ").strip()
+                if not choice:
+                    continue
+
+                idx = int(choice) - 1
+                if 0 <= idx < len(characters):
+                    return characters[idx]
+                else:
+                    print("❌ 无效选择，请重新输入")
+            except ValueError:
+                print("❌ 请输入数字")
+            except KeyboardInterrupt:
+                print("\n👋 训练已取消")
+                sys.exit(0)
+
+    def check_prerequisites(self, character: str) -> bool:
+        """检查训练前置条件"""
+        print(f"\n🔍 检查 {character} 的训练前置条件...")
+
+        # 检查角色配置
+        if character not in self.config.get('characters', {}):
+            print(f"❌ 角色配置不存在: {character}")
+            return False
+
+        # 检查数据文件
+        train_path, val_path = self.auto_match_files(character)
+        if not train_path:
+            print(f"❌ 未找到 {character} 的训练数据")
+            print(f"   请确保在以下位置放置数据文件:")
+            print(f"   - datasets/{character}/train.jsonl")
+            print(f"   - datasets/{character}/val.jsonl")
+            return False
+
+        # 验证数据格式
+        print("🔍 验证数据格式...")
+        valid, msg = self.validate_jsonl(Path(train_path))
+        if not valid:
+            print(f"❌ 训练数据格式错误: {msg}")
+            return False
+
+        if val_path:
+            valid, msg = self.validate_jsonl(Path(val_path))
+            if not valid:
+                print(f"❌ 验证数据格式错误: {msg}")
+                return False
+
+        # 检查样本数量
+        train_count = self.count_samples(Path(train_path))
+        if train_count < 10:
+            print(f"⚠️  训练样本数量较少: {train_count} (建议 ≥ 10)")
+
+        print(f"✅ 前置条件检查通过")
+        return True
+
+    def show_main_menu(self):
+        """显示主菜单（整合quick_start.sh功能）"""
+        while True:
+            print("\n" + "="*50)
+            print("🚀 智能LoRA训练系统 - 主菜单")
+            print("="*50)
+            print("1) 🎭 角色训练（智能文件匹配）")
+            print("2) 📊 数据集管理")
+            print("3) 🔍 系统状态检查")
+            print("4) 🤖 Ollama模型管理")
+            print("5) 🧪 模型测试")
+            print("0) 退出")
+            print()
+
+            try:
+                choice = input("请选择 (0-5): ").strip()
+
+                if choice == "1":
+                    self._menu_character_training()
+                elif choice == "2":
+                    self._menu_dataset_management()
+                elif choice == "3":
+                    self._menu_system_status()
+                elif choice == "4":
+                    self._menu_ollama_management()
+                elif choice == "5":
+                    self._menu_model_testing()
+                elif choice == "0":
+                    print("👋 再见！")
+                    break
+                else:
+                    print("❌ 无效选择")
+
+            except (KeyboardInterrupt, EOFError):
+                print("\n👋 再见！")
+                break
+
+    def _menu_character_training(self):
+        """菜单：角色训练"""
+        print("\n🎭 角色训练选项:")
+        print("1) 交互式选择角色")
+        print("2) 查看所有配置")
+        print("3) 扫描数据集状态")
+        print("4) 检查模型缓存")
+
+        choice = input("选择 (1-4): ").strip()
+
+        if choice == "1":
+            character = self.interactive_select()
+            if self.check_prerequisites(character):
+                self._confirm_and_train(character)
+        elif choice == "2":
+            self.list_configurations()
+        elif choice == "3":
+            self._show_dataset_scan()
+        elif choice == "4":
+            self.check_model_cache()
+
+    def _menu_dataset_management(self):
+        """菜单：数据集管理"""
+        print("\n📊 数据集管理:")
+        print("1) 扫描所有数据集")
+        print("2) 验证数据格式")
+        print("3) 查看数据统计")
+
+        choice = input("选择 (1-3): ").strip()
+
+        if choice == "1":
+            self._show_dataset_scan()
+        elif choice == "2":
+            self._validate_all_datasets()
+        elif choice == "3":
+            self._show_dataset_stats()
+
+    def _menu_system_status(self):
+        """菜单：系统状态"""
+        print("\n🔍 系统状态检查:")
+        print("1) 检查模型缓存")
+        print("2) 检查训练环境")
+        print("3) 查看磁盘使用")
+
+        choice = input("选择 (1-3): ").strip()
+
+        if choice == "1":
+            self.check_model_cache()
+        elif choice == "2":
+            self._check_training_environment()
+        elif choice == "3":
+            self._check_disk_usage()
+
+    def _menu_ollama_management(self):
+        """菜单：Ollama管理"""
+        print("\n🤖 Ollama模型管理:")
+        print("1) 查看Ollama模型列表")
+        print("2) 导入训练好的模型到Ollama")
+        print("3) 删除Ollama模型")
+
+        choice = input("选择 (1-3): ").strip()
+
+        if choice == "1":
+            self._show_ollama_models()
+        elif choice == "2":
+            self._import_to_ollama()
+        elif choice == "3":
+            self._delete_ollama_model()
+
+    def _menu_model_testing(self):
+        """菜单：模型测试"""
+        self._test_ollama_model()
+
+    def start_training(self, character: str, background: bool = False, export_ollama: bool = False, ollama_name: str = None):
+        """启动训练"""
+        print(f"\n🚀 启动 {character} 的LoRA训练...")
+
+        # 获取角色配置
+        char_config = self.config.get('characters', {}).get(character)
+        if not char_config:
+            print(f"❌ 未找到角色配置: {character}")
+            return
+
+        # 获取数据文件路径
+        train_path, val_path = self.auto_match_files(character)
+        if not train_path:
+            print(f"❌ 未找到训练数据文件")
+            return
+
+        # 获取训练参数
+        training_params = char_config.get('training_params', {})
+
+        # 构建训练命令
+        cmd = [
+            sys.executable, "train_lora.py",
+            "--train_jsonl", train_path,
+            "--output_dir", f"out/lora_{character}"
+        ]
+
+        # 添加验证数据
+        if val_path:
+            cmd.extend(["--val_jsonl", val_path])
+
+        # 添加训练参数
+        if 'epochs' in training_params:
+            cmd.extend(["--num_train_epochs", str(training_params['epochs'])])
+        if 'learning_rate' in training_params:
+            cmd.extend(["--learning_rate", str(training_params['learning_rate'])])
+        if 'lora_r' in training_params:
+            cmd.extend(["--lora_r", str(training_params['lora_r'])])
+        if 'lora_alpha' in training_params:
+            cmd.extend(["--lora_alpha", str(training_params['lora_alpha'])])
+        if 'lora_dropout' in training_params:
+            cmd.extend(["--lora_dropout", str(training_params['lora_dropout'])])
+
+        # 默认参数
+        cmd.extend([
+            "--merge_and_save",  # 自动合并并保存
+            "--merged_dir", f"out/merged_{character}"
+        ])
+
+        print(f"📝 执行命令: {' '.join(cmd)}")
+
+        if background:
+            print("🔄 后台训练模式...")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+
+            # 实时显示输出
+            for line in process.stdout:
+                print(line.rstrip())
+
+            process.wait()
+
+            if process.returncode == 0:
+                print(f"🎉 {character} 训练完成!")
+                print(f"   LoRA模型: out/lora_{character}")
+                print(f"   合并模型: out/merged_{character}")
+                return_code = process.returncode
+            else:
+                print(f"❌ {character} 训练失败 (退出码: {process.returncode})")
+                return_code = process.returncode
+        else:
+            # 直接执行，用户可以看到实时输出
+            result = subprocess.run(cmd)
+            if result.returncode == 0:
+                print(f"🎉 {character} 训练完成!")
+                print(f"   LoRA模型: out/lora_{character}")
+                print(f"   合并模型: out/merged_{character}")
+            else:
+                print(f"❌ {character} 训练失败")
+            return_code = result.returncode
+
+        # 训练完成后的友好提示和Ollama导入处理
+        if return_code == 0:
+            if export_ollama:
+                self._export_to_ollama(character, ollama_name)
+            else:
+                self._show_post_training_options(character, ollama_name)
+
+    def _show_post_training_options(self, character: str, ollama_name: str = None):
+        """训练完成后显示后续选项"""
+        print("\n" + "=" * 60)
+        print("🎉 训练完成！下一步操作")
+        print("=" * 60)
+        print(f"✅ 模型已训练完成：{character}")
+        print(f"📁 文件位置：out/merged_{character}/")
+        print()
+        print("⚠️  注意：模型目前还没有导入到Ollama，无法直接使用")
+        print()
+        print("📋 后续选项：")
+        print("1) 🚀 导入到Ollama（推荐）- 可以立即使用 ollama run 命令")
+        print("2) 📦 稍后导入 - 返回主菜单，通过 4)Ollama模型管理 导入")
+        print("3) 🏠 返回主菜单 - 继续其他操作")
+        print("4) 👋 退出系统")
+        print()
+
+        while True:
+            try:
+                choice = input("请选择 (1-4): ").strip()
+
+                if choice == "1":
+                    # 询问Ollama模型名称
+                    if not ollama_name:
+                        default_name = f"{character}-lora"
+                        ollama_name = input(f"请输入Ollama模型名称 (默认: {default_name}): ").strip()
+                        if not ollama_name:
+                            ollama_name = default_name
+
+                    success = self._export_to_ollama(character, ollama_name)
+                    if success:
+                        print(f"\n🎉 导入成功！现在可以使用：")
+                        print(f"   ollama run {ollama_name}")
+                        print()
+                        input("按回车键返回主菜单...")
+                    break
+
+                elif choice == "2":
+                    print("\n💡 提示：稍后可通过主菜单 -> 4)Ollama模型管理 -> 2)导入训练好的模型 来导入")
+                    input("按回车键返回主菜单...")
+                    break
+
+                elif choice == "3":
+                    print("\n🏠 返回主菜单...")
+                    break
+
+                elif choice == "4":
+                    print("\n👋 感谢使用！")
+                    sys.exit(0)
+
+                else:
+                    print("❌ 无效选择，请输入1-4")
+
+            except (KeyboardInterrupt, EOFError):
+                print("\n\n🏠 返回主菜单...")
+                break
+
+    def _export_to_ollama(self, character: str, ollama_name: str = None):
+        """导出到Ollama"""
+        if not ollama_name:
+            ollama_name = f"{character}-lora"
+
+        print(f"\n🚀 导出到Ollama: {ollama_name}")
+
+        # 使用绝对路径并验证目录存在
+        merged_dir = Path(f"out/merged_{character}").resolve()
+        if not merged_dir.exists():
+            print(f"❌ 合并模型不存在: {merged_dir}")
+            print("   请确保训练时使用了 --merge_and_save 参数")
+            return False
+
+        # 验证模型文件是否完整
+        model_files = ["model.safetensors", "pytorch_model.bin"]  # 支持新旧格式
+        has_model = any((merged_dir / f).exists() for f in model_files)
+
+        required_files = ["config.json", "tokenizer.json"]
+        missing_files = []
+        for file_name in required_files:
+            if not (merged_dir / file_name).exists():
+                missing_files.append(file_name)
+
+        if not has_model:
+            missing_files.append("model.safetensors 或 pytorch_model.bin")
+
+        if missing_files:
+            print(f"⚠️  模型文件不完整，缺少: {', '.join(missing_files)}")
+            print("   模型可能仍可使用，但建议重新训练")
+
+        print(f"📁 模型路径: {merged_dir}")
+        print(f"📦 模型大小: {sum(f.stat().st_size for f in merged_dir.glob('*')) / (1024**3):.1f} GB")
+
+        # 创建Ollama Modelfile (使用绝对路径)
+        modelfile_content = f"""FROM {merged_dir}
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+SYSTEM \"你是{character}，请保持角色特征进行对话。\"
+"""
+
+        try:
+            # 使用ollama create命令
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.modelfile', delete=False) as f:
+                f.write(modelfile_content)
+                modelfile_path = f.name
+
+            cmd = f"ollama create {ollama_name} -f {modelfile_path}"
+            print(f"执行: {cmd}")
+
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                print(f"✅ 成功导入到Ollama: {ollama_name}")
+                print(f"🧪 测试命令: ollama run {ollama_name}")
+                return True
+            else:
+                print(f"❌ 导入失败: {result.stderr}")
+                return False
+
+        except Exception as e:
+            print(f"❌ 导出过程出错: {e}")
+            return False
+
+    def _show_dataset_scan(self):
+        """显示数据集扫描结果"""
+        dataset_info = self.scan_datasets()
+        print("\n📊 数据集扫描结果:")
+        print("=" * 50)
+        for char_name, info in dataset_info.items():
+            print(f"\n📁 {char_name}/")
+            print(f"   训练文件: {len(info['train_files'])}个")
+            for tf in info['train_files']:
+                print(f"      📄 {tf.name} ({self.count_samples(tf)}样本)")
+            print(f"   验证文件: {len(info['val_files'])}个")
+            for vf in info['val_files']:
+                print(f"      📄 {vf.name} ({self.count_samples(vf)}样本)")
+
+    def _validate_all_datasets(self):
+        """验证所有数据集格式"""
+        dataset_info = self.scan_datasets()
+        print("\n🔍 验证数据集格式...")
+
+        for char_name, info in dataset_info.items():
+            print(f"\n📁 {char_name}:")
+
+            for file_list, file_type in [(info['train_files'], '训练'), (info['val_files'], '验证')]:
+                for file_path in file_list:
+                    valid, msg = self.validate_jsonl(file_path)
+                    status = "✅" if valid else "❌"
+                    print(f"   {status} {file_type}文件 {file_path.name}: {msg}")
+
+    def _show_dataset_stats(self):
+        """显示数据集统计信息"""
+        dataset_info = self.scan_datasets()
+        print("\n📊 数据集统计:")
+        print("=" * 50)
+
+        total_train = 0
+        total_val = 0
+
+        for char_name, info in dataset_info.items():
+            train_count = sum(self.count_samples(f) for f in info['train_files'])
+            val_count = sum(self.count_samples(f) for f in info['val_files'])
+
+            print(f"📁 {char_name}: {train_count}训练样本 + {val_count}验证样本")
+            total_train += train_count
+            total_val += val_count
+
+        print(f"\n📈 总计: {total_train}训练样本 + {total_val}验证样本")
+
+    def _check_training_environment(self):
+        """检查训练环境"""
+        print("\n🔍 检查训练环境...")
+
+        try:
+            # 检查Python版本
+            import sys
+            print(f"   🐍 Python: {sys.version}")
+
+            # 检查关键库
+            libs = ['torch', 'transformers', 'peft', 'trl', 'datasets']
+            for lib in libs:
+                try:
+                    module = __import__(lib)
+                    version = getattr(module, '__version__', 'unknown')
+                    print(f"   ✅ {lib}: {version}")
+                except ImportError:
+                    print(f"   ❌ {lib}: 未安装")
+
+            # 检查设备
+            try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+                print(f"   🖥️  设备: {device}")
+            except:
+                print(f"   ⚠️  设备: 无法检测")
+
+        except Exception as e:
+            print(f"   ❌ 环境检查失败: {e}")
+
+    def _check_disk_usage(self):
+        """检查磁盘使用情况"""
+        print("\n💽 磁盘使用情况...")
+
+        dirs_to_check = ['out/', 'datasets/', '.cache/']
+
+        for dir_name in dirs_to_check:
+            dir_path = Path(dir_name)
+            if dir_path.exists():
+                total_size = sum(f.stat().st_size for f in dir_path.rglob('*') if f.is_file())
+                if total_size > 1024**3:  # > 1GB
+                    size_str = f"{total_size / (1024**3):.1f} GB"
+                else:
+                    size_str = f"{total_size / (1024**2):.1f} MB"
+                print(f"   📁 {dir_name}: {size_str}")
+            else:
+                print(f"   📁 {dir_name}: 不存在")
+
+    def _show_ollama_models(self):
+        """显示Ollama模型列表"""
+        print("\n🤖 Ollama模型列表:")
+        try:
+            result = subprocess.run(['ollama', 'list'], capture_output=True, text=True)
+            if result.returncode == 0:
+                print(result.stdout)
+            else:
+                print("❌ 无法获取Ollama模型列表")
+        except Exception as e:
+            print(f"❌ 错误: {e}")
+
+    def _import_to_ollama(self):
+        """导入模型到Ollama"""
+        print("\n🚀 导入模型到Ollama")
+
+        # 扫描可用的合并模型
+        out_dir = Path("out")
+        if not out_dir.exists():
+            print("❌ out目录不存在，请先训练模型")
+            return
+
+        merged_dirs = list(out_dir.glob("merged_*"))
+        if not merged_dirs:
+            print("❌ 未找到已训练的模型")
+            return
+
+        print("\n📋 可导入的模型:")
+        for i, dir_path in enumerate(merged_dirs, 1):
+            character = dir_path.name.replace("merged_", "")
+
+            # 尝试从配置文件获取中文名称和描述
+            char_config = self.config.get('characters', {}).get(character, {})
+            chinese_name = char_config.get('name', character)  # 如果没有配置，显示英文名
+            description = char_config.get('description', '未配置')
+
+            # 显示：序号) 中文名 (英文代码) - 描述
+            print(f"   {i}) {chinese_name} ({character}) - {description}")
+
+        try:
+            choice = int(input(f"\n请选择模型 (1-{len(merged_dirs)}): "))
+            if 1 <= choice <= len(merged_dirs):
+                selected_dir = merged_dirs[choice - 1]
+                character = selected_dir.name.replace("merged_", "")
+
+                # 获取中文名称用于确认
+                char_config = self.config.get('characters', {}).get(character, {})
+                chinese_name = char_config.get('name', character)
+
+                print(f"\n✅ 已选择: {chinese_name} ({character})")
+
+                ollama_name = input(f"Ollama模型名称 (默认: {character}-lora): ").strip()
+                if not ollama_name:
+                    ollama_name = f"{character}-lora"
+
+                self._export_to_ollama(character, ollama_name)
+        except (ValueError, IndexError):
+            print("❌ 无效选择")
+
+    def _delete_ollama_model(self):
+        """删除Ollama模型"""
+        print("\n🗑️ 删除Ollama模型")
+        model_name = input("输入要删除的模型名称: ").strip()
+
+        if model_name:
+            try:
+                result = subprocess.run(['ollama', 'rm', model_name], capture_output=True, text=True)
+                if result.returncode == 0:
+                    print(f"✅ 已删除模型: {model_name}")
+                else:
+                    print(f"❌ 删除失败: {result.stderr}")
+            except Exception as e:
+                print(f"❌ 错误: {e}")
+
+    def _test_ollama_model(self):
+        """测试Ollama模型"""
+        print("\n🧪 测试Ollama模型")
+
+        # 显示可用模型
+        self._show_ollama_models()
+
+        model_name = input("\n输入要测试的模型名称: ").strip()
+        if model_name:
+            test_prompt = "你好，请介绍一下自己。"
+            print(f"\n测试提示: {test_prompt}")
+            print("回答:")
+            print("-" * 40)
+
+            try:
+                result = subprocess.run(['ollama', 'run', model_name],
+                                     input=test_prompt, text=True, capture_output=True)
+                if result.returncode == 0:
+                    print(result.stdout)
+                else:
+                    print(f"❌ 测试失败: {result.stderr}")
+            except Exception as e:
+                print(f"❌ 错误: {e}")
+
+    def _confirm_and_train(self, character: str):
+        """确认并开始训练"""
+        print(f"\n💡 即将开始训练 '{character}'")
+
+        # 询问是否导出到Ollama
+        export_ollama = False
+        ollama_name = None
+
+        try:
+            ollama_choice = input("训练完成后是否导入到Ollama? (y/N): ").strip().lower()
+            if ollama_choice in ['y', 'yes']:
+                export_ollama = True
+                ollama_name = input(f"Ollama模型名称 (默认: {character}-lora): ").strip()
+                if not ollama_name:
+                    ollama_name = f"{character}-lora"
+
+            confirm = input("确认开始训练? (y/N): ").strip().lower()
+            if confirm in ['y', 'yes']:
+                self.start_training(character, export_ollama=export_ollama, ollama_name=ollama_name)
+            else:
+                print("👋 训练已取消")
+
+        except (KeyboardInterrupt, EOFError):
+            print("\n👋 训练已取消")
+
+def main():
+    parser = argparse.ArgumentParser(description="智能LoRA训练脚本")
+    parser.add_argument("character", nargs="?", help="要训练的角色名称")
+    parser.add_argument("--character", "-c", dest="character_flag", help="指定要训练的角色")
+    parser.add_argument("--list", "-l", action="store_true", help="列出所有可用配置")
+    parser.add_argument("--scan", "-s", action="store_true", help="扫描数据集状态")
+    parser.add_argument("--background", "-b", action="store_true", help="后台训练模式")
+    parser.add_argument("--yes", "-y", action="store_true", help="跳过确认，直接开始训练")
+    parser.add_argument("--cache", action="store_true", help="检查模型缓存状态")
+    parser.add_argument("--menu", "-m", action="store_true", help="显示交互式菜单")
+    parser.add_argument("--ollama", "-o", action="store_true", help="训练后导入到Ollama")
+    parser.add_argument("--ollama_name", type=str, help="指定Ollama模型名称")
+
+    args = parser.parse_args()
+
+    trainer = SmartTrainer()
+
+    # 处理命令行参数
+    if args.menu:
+        trainer.show_main_menu()
+        return
+
+    if args.list:
+        trainer.list_configurations()
+        return
+
+    if args.scan:
+        dataset_info = trainer.scan_datasets()
+        print("\n📊 数据集扫描结果:")
+        print("=" * 50)
+        for char_name, info in dataset_info.items():
+            print(f"\n📁 {char_name}/")
+            print(f"   训练文件: {len(info['train_files'])}个")
+            for tf in info['train_files']:
+                print(f"      📄 {tf.name} ({trainer.count_samples(tf)}样本)")
+            print(f"   验证文件: {len(info['val_files'])}个")
+            for vf in info['val_files']:
+                print(f"      📄 {vf.name} ({trainer.count_samples(vf)}样本)")
+        return
+
+    if args.cache:
+        trainer.check_model_cache()
+        return
+
+    # 选择角色
+    character = args.character or args.character_flag
+    if character:
+        print(f"🎯 指定角色: {character}")
+    else:
+        character = trainer.interactive_select()
+
+    # 检查前置条件
+    if not trainer.check_prerequisites(character):
+        print("\n💡 建议:")
+        print("   1. 检查数据文件是否存在")
+        print("   2. 验证JSONL格式是否正确")
+        print("   3. 运行 'python smart_train.py --scan' 查看详细状态")
+        sys.exit(1)
+
+    # 确认训练
+    if not args.yes:
+        print(f"\n💡 即将开始训练 '{character}'")
+        try:
+            confirm = input("确认开始训练? (y/N): ").strip().lower()
+            if confirm not in ['y', 'yes']:
+                print("👋 训练已取消")
+                return
+        except (KeyboardInterrupt, EOFError):
+            print("\n👋 训练已取消")
+            return
+    else:
+        print(f"\n🚀 自动开始训练 '{character}'")
+
+    # 开始训练
+    trainer.start_training(character, args.background,
+                          export_ollama=args.ollama,
+                          ollama_name=args.ollama_name)
+
+if __name__ == "__main__":
+    main()

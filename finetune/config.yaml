@@ -1,0 +1,53 @@
+# LoRA 微调配置文件
+# 针对角色扮演/对话任务优化
+
+# 基础模型配置
+model:
+  # 开放模型选项（按推荐顺序）:
+  # 1. "Qwen/Qwen2.5-1.5B" - 基础版，无审查，需要更多数据
+  # 2. "mistralai/Mistral-7B-v0.1" - 开放，无审查，需要更多显存
+  # 3. "TinyLlama/TinyLlama-1.1B-Chat-v1.0" - 小巧开放
+  # 4. "THUDM/glm-4-9b" - 中文优化，较开放
+  # 5. "01-ai/Yi-1.5-6B" - 中文好，相对开放
+  base_model: "Qwen/Qwen2.5-0.5B"
+  model_type: "qwen"
+
+# 训练参数
+training:
+  epochs: 3.0                 # 训练轮数（数据少可以适当增加到4-5）
+  learning_rate: 1e-4         # 👈 降低学习率，避免破坏原有能力
+  warmup_ratio: 0.1           # 👈 增加warmup，让训练更稳定
+  weight_decay: 0.01          # 👈 添加权重衰减，防止过拟合
+  seed: 42
+
+# LoRA 参数 (针对0.5B小模型优化)
+lora:
+  rank: 16                    # 👈 小模型用小rank，16-32足够
+  alpha: 32                   # 👈 alpha = 2 * rank 是常见配置
+  dropout: 0.1                # dropout保持0.1
+
+# 数据参数
+data:
+  max_seq_length: 0
+  batch_size: 0
+  gradient_accumulation: 0
+
+# 日志和保存
+logging:
+  logging_steps: 10
+  save_steps: 200
+  eval_steps: 200
+
+# Ollama 参数 (生成时使用)
+ollama:
+  temperature: 0.7            # 👈 0.7-0.8 比较平衡，太高会胡说
+  top_p: 0.9
+  top_k: 40
+  repeat_penalty: 1.1         # 👈 稍微提高，减少重复
+  context_length: 2048        # 👈 小模型用2048足够
+
+# 高级选项
+advanced:
+  gradient_checkpointing: false
+  no_eval: false
+  report_to: "none"

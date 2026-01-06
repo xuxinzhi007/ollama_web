@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from env_detect import lora_target_modules_for_qwen, plan_environment, pretty_env_summary
+from download_progress import progress_indicator
 
 
 def _require(pkg: str):
@@ -99,18 +100,32 @@ def main() -> None:
     # 所以 env_detect 已默认把 MPS 设为 fp32；这里再做一次兜底。
     torch_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[plan.dtype]
 
-    # tokenizer & model
+    # tokenizer & model - 智能缓存检测
+    try:
+        from model_cache import smart_model_load_message
+        smart_model_load_message(args.model_name_or_path)
+    except ImportError:
+        print(f"\n📥 正在加载模型: {args.model_name_or_path}")
+        print(f"💡 如果是第一次使用，需要从网络下载（约500MB-1GB）")
+
+    # 加载tokenizer，简化提示
+    print("⏳ 加载 Tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
+    print("✅ Tokenizer 加载完成")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     # device_map 策略：cuda 用 auto；mps/cpu 直接本地加载后 .to(device)
     device_map = "auto" if plan.device == "cuda" else None
-    # transformers 新版本逐步将 torch_dtype 参数迁移为 dtype
+
     model_kwargs: Dict[str, Any] = {"device_map": device_map}
     if plan.device != "cpu":
         model_kwargs["dtype"] = torch_dtype
+
+    # 加载模型，简化提示
+    print("⏳ 加载模型权重（这可能需要几分钟）...")
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
+    print("✅ 模型权重加载完成")
 
     if plan.device in ("mps", "cpu"):
         model.to(plan.device)
