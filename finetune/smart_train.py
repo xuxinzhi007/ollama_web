@@ -840,6 +840,8 @@ class SmartTrainer:
 
         resume_from_checkpoint = None
         remaining_epochs = None
+        current_epoch_for_resume = None
+        total_epochs_target = None
         if choice == "resume":
             # 断点续训模式
             lora_dir = Path(f"out/lora_{character}")
@@ -904,6 +906,7 @@ class SmartTrainer:
                             global_step = trainer_state.get('global_step', 0)
                             log_history = trainer_state.get('log_history', [])
                             last_loss = log_history[-1].get('loss', 'N/A') if log_history else 'N/A'
+                            current_epoch_for_resume = float(current_epoch) if current_epoch is not None else 0.0
                             
                             total_epochs = training_params.get('epochs', 3.0)
                             remaining_epochs = max(0.1, total_epochs - current_epoch)
@@ -916,7 +919,23 @@ class SmartTrainer:
                             
                             if current_epoch >= total_epochs - 0.1:
                                 print(f"⚠️  警告：训练已接近完成（{current_epoch:.2f}/{total_epochs} epochs）")
-                                print(f"   建议：如果需要更多训练，请增加总epochs数")
+                                print(f"   你选择“继续训练”时，可以在此基础上再额外训练一些 epochs（更像微调风格稳定性，不会凭空增加常识能力）。")
+                                try:
+                                    extra = input("请输入要额外继续训练的 epochs（默认 1.0，输入 0 取消继续训练）: ").strip()
+                                    if extra == "":
+                                        extra_epochs = 1.0
+                                    else:
+                                        extra_epochs = float(extra)
+                                    if extra_epochs <= 0:
+                                        print("👋 已取消继续训练")
+                                        return
+                                    # 关键：transformers/trl 的 resume 语义是“训练到总 epochs”，不是“追加 epochs”
+                                    # 所以这里需要把 --num_train_epochs 设置为 current_epoch + extra_epochs
+                                    total_epochs_target = max(0.1, float(current_epoch_for_resume or 0.0) + float(extra_epochs))
+                                    print(f"📊 将额外继续训练 {extra_epochs:.2f} epochs（目标总epochs: {total_epochs_target:.2f}）")
+                                except Exception:
+                                    # 输入异常时，保持原逻辑（至少继续一点点）
+                                    pass
                             
                             # 显示所有可用checkpoint供参考
                             if len(checkpoint_info) > 1:
@@ -951,9 +970,14 @@ class SmartTrainer:
 
         # 添加训练参数
         # 重要：如果继续训练，使用剩余epochs数，而不是总epochs数
-        if resume_from_checkpoint and remaining_epochs:
-            cmd.extend(["--num_train_epochs", str(remaining_epochs)])
-            print(f"📊 继续训练剩余 {remaining_epochs:.2f} epochs")
+        if resume_from_checkpoint:
+            if total_epochs_target is not None:
+                cmd.extend(["--num_train_epochs", str(total_epochs_target)])
+                print(f"📊 继续训练：目标总epochs {total_epochs_target:.2f}")
+            elif remaining_epochs:
+                # fallback：如果没拿到 current_epoch，就用“剩余”作为最低限度的继续训练
+                cmd.extend(["--num_train_epochs", str(remaining_epochs)])
+                print(f"📊 继续训练剩余 {remaining_epochs:.2f} epochs")
         elif 'epochs' in training_params:
             cmd.extend(["--num_train_epochs", str(training_params['epochs'])])
         if 'learning_rate' in training_params:
@@ -1084,6 +1108,22 @@ class SmartTrainer:
 
         print(f"\n🚀 导出到Ollama: {ollama_name}")
 
+        # 覆盖同名模型：先检测是否存在，存在则删除后重建，避免“看似导入成功但实际还是旧模型”
+        try:
+            show = subprocess.run(["ollama", "show", ollama_name], capture_output=True, text=True)
+            if show.returncode == 0:
+                ans = input(f"⚠️ 已存在模型 {ollama_name}，是否覆盖？(Y/n): ").strip().lower()
+                if ans in ["n", "no"]:
+                    print("👋 已取消导入")
+                    return False
+                rm = subprocess.run(["ollama", "rm", ollama_name], capture_output=True, text=True)
+                if rm.returncode != 0:
+                    msg = (rm.stderr or rm.stdout or "").strip()
+                    print(f"❌ 删除旧模型失败: {msg}")
+                    return False
+        except Exception as e:
+            print(f"⚠️ 无法检测/删除同名模型（将继续尝试导入）: {e}")
+
         # 使用绝对路径并验证目录存在
         merged_dir = Path(f"out/merged_{character}").resolve()
         if not merged_dir.exists():
@@ -1095,17 +1135,37 @@ class SmartTrainer:
         # Ollama 的 Modelfile `FROM` 需要是 Ollama 模型名或本地 GGUF 文件路径。
         # HuggingFace 合并目录（config.json + safetensors）不能可靠地直接作为 `FROM <dir>` 使用。
         # 这会导致“看似导入成功，但实际运行的不是训练后的权重”，出现你看到的“刷题/不搭边”输出。
-        gguf_files = sorted(merged_dir.glob("*.gguf"))
-        if not gguf_files:
-            print(f"⚠️  未找到 GGUF 文件（{merged_dir}/*.gguf），将尝试自动转换...")
+        # 选择/生成 GGUF
+        # 关键：如果 GGUF 比 merged 权重更旧，则必须重新生成，否则 Ollama 实际跑的是旧模型（表现为“怎么训都不变/答得很怪”）
+        gguf_out = (merged_dir / f"{character}.gguf").resolve()
+        weight_file = None
+        for cand in ["model.safetensors", "pytorch_model.bin"]:
+            p = merged_dir / cand
+            if p.exists():
+                weight_file = p
+                break
 
-            gguf_out = (merged_dir / f"{character}.gguf").resolve()
-            # 如果已有同名但为空/损坏，先删
-            if gguf_out.exists() and gguf_out.stat().st_size == 0:
+        def _needs_rebuild_gguf() -> bool:
+            if not gguf_out.exists():
+                return True
+            try:
+                if gguf_out.stat().st_size == 0:
+                    return True
+                if weight_file and weight_file.exists():
+                    return gguf_out.stat().st_mtime < weight_file.stat().st_mtime
+            except Exception:
+                return True
+            return False
+
+        if _needs_rebuild_gguf():
+            if gguf_out.exists():
                 try:
+                    print("⚠️  检测到 GGUF 可能过期/损坏（或模型已重新训练），将重新生成 GGUF...")
                     gguf_out.unlink()
                 except Exception:
                     pass
+            else:
+                print(f"⚠️  未找到 GGUF 文件（{merged_dir}/*.gguf），将尝试自动转换...")
 
             ok = self._convert_merged_to_gguf(merged_dir=merged_dir, gguf_out=gguf_out, outtype="f16")
             if not ok:
@@ -1113,17 +1173,17 @@ class SmartTrainer:
                 print(f"   python /path/to/llama.cpp/convert_hf_to_gguf.py \"{merged_dir}\" --outtype f16 --outfile \"{gguf_out}\"")
                 return False
 
-            gguf_files = sorted(merged_dir.glob("*.gguf"))
-            if not gguf_files:
-                print("❌ 自动转换完成但未发现 .gguf 文件")
-                return False
+        if not gguf_out.exists():
+            print("❌ 未找到/未生成 GGUF 文件")
+            return False
 
-        gguf_path = gguf_files[-1].resolve()
+        gguf_path = gguf_out
         print(f"📦 将使用 GGUF: {gguf_path}")
 
         # 创建Ollama Modelfile (使用完整角色配置和优化推理参数)
         self._ensure_config_loaded()
         char_config = self.config.get('characters', {}).get(character, {})
+        global_settings = (self.config.get("global_settings") or {}) if isinstance(self.config, dict) else {}
 
         # 简化system_prompt，避免格式化的列表（防止模型输出格式标记）
         raw_system_prompt = char_config.get('system_prompt', f'你是{character}，请保持角色特征进行对话。').strip()
@@ -1161,18 +1221,19 @@ class SmartTrainer:
                 # 如果简化失败，使用最基本的设定
                 system_prompt = f"你是{char_config.get('name', character)}，请按照角色性格进行对话。"
 
-        # 强约束：防止输出“题目/答案/解析/选择题”等跑偏内容，以及避免输出角色标签
-        # 这些内容通常是底座模型的“通用应试/解题”倾向，角色扮演场景下需要明确禁止。
-        system_prompt = (
-            f"{system_prompt}\n\n"
-            "输出规则：\n"
-            "1) 你必须用第一人称，以角色口吻与用户对话。\n"
-            "2) 禁止输出：题目、答案、解析、判断题、选择题、A/B/C/D 选项、填空题、材料分析等应试内容。\n"
-            "3) 禁止输出：system/user/assistant 等角色标签或提示词格式。\n"
-            "4) 回复自然简短，避免重复同一句话。\n"
-            "5) 遇到客观问题（如数学、时间、常识）：必须先给出准确答案；不要胡编。\n"
-            "   例如：用户问“1+1等于几”，你要回答“2”，然后再用林栀口吻补一句也可以。\n"
-        )
+        # 规则：优先用角色配置里的 system_prompt_rules；否则使用默认规则（保持现有行为）
+        rules_text = char_config.get("system_prompt_rules") or global_settings.get("system_prompt_rules")
+        if not rules_text:
+            rules_text = (
+                "输出规则：\n"
+                "1) 你必须用第一人称，以角色口吻与用户对话。\n"
+                "2) 禁止输出：题目、答案、解析、判断题、选择题、A/B/C/D 选项、填空题、材料分析等应试内容。\n"
+                "3) 禁止输出：system/user/assistant 等角色标签或提示词格式。\n"
+                "4) 回复自然简短，避免重复同一句话。\n"
+                "5) 遇到客观问题（如数学、时间、常识）：必须先给出准确答案；不要胡编。\n"
+                "   例如：用户问“1+1等于几”，你要回答“2”，然后再用林栀口吻补一句也可以。\n"
+            )
+        system_prompt = f"{system_prompt}\n\n{str(rules_text).strip()}\n"
         
         # 获取角色的中文名称用于显示
         char_name = char_config.get('name', character)
@@ -1182,9 +1243,10 @@ class SmartTrainer:
         print(f"📄 System Prompt (简化): {system_prompt[:100]}..." if len(system_prompt) > 100 else f"📄 System Prompt (简化): {system_prompt}")
 
         # 优化推理参数，更适合角色扮演
-        # 关键：显式指定 Qwen 的对话模板，避免 Ollama 使用不匹配的默认模板导致输出“system/参考答案/刷题风”。
-        # 这里用 Qwen2 的 <|im_start|>/<|im_end|> 格式，兼容多轮对话。
-        template = r"""{{- if .System -}}<|im_start|>system
+        # 模板：允许在角色文件中覆盖；默认使用 Qwen2 的 <|im_start|>/<|im_end|> 格式
+        template = char_config.get("ollama_template") or global_settings.get("ollama_template")
+        if not template:
+            template = r"""{{- if .System -}}<|im_start|>system
 {{ .System }}<|im_end|>
 {{- else -}}<|im_start|>system
 You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
@@ -1201,14 +1263,33 @@ You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
 <|im_start|>assistant
 """
 
+        # 推理参数：角色 inference_params 覆盖全局 inference_defaults，再覆盖代码默认值
+        defaults = global_settings.get("inference_defaults") or {}
+        infer = {}
+        if isinstance(defaults, dict):
+            infer.update(defaults)
+        if isinstance(char_config.get("inference_params"), dict):
+            infer.update(char_config["inference_params"])
+
+        temperature = infer.get("temperature", 0.5)
+        top_p = infer.get("top_p", 0.9)
+        top_k = infer.get("top_k", 40)
+        repeat_penalty = infer.get("repeat_penalty", 1.15)
+        num_predict = infer.get("num_predict", 256)
+        stop_list = infer.get("stop", ["<|im_end|>"])
+        if isinstance(stop_list, str):
+            stop_list = [stop_list]
+
+        stop_lines = "\n".join([f'PARAMETER stop "{s}"' for s in stop_list if s])
+
         modelfile_content = f"""FROM {gguf_path}
 # 更稳的角色扮演推理参数（减少跑偏与长篇刷题）
-PARAMETER temperature 0.5
-PARAMETER top_p 0.9
-PARAMETER top_k 40
-PARAMETER repeat_penalty 1.15
-PARAMETER num_predict 256
-PARAMETER stop "<|im_end|>"
+PARAMETER temperature {temperature}
+PARAMETER top_p {top_p}
+PARAMETER top_k {top_k}
+PARAMETER repeat_penalty {repeat_penalty}
+PARAMETER num_predict {num_predict}
+{stop_lines}
 
 TEMPLATE \"\"\"{template}\"\"\"
 SYSTEM \"\"\"{system_prompt}\"\"\"

@@ -271,7 +271,9 @@ def main() -> None:
         print(f"🔄 开始从checkpoint恢复训练...")
         print(f"   如果loss从初始值开始，说明checkpoint可能没有正确加载")
     
-    trainer.train()
+    # 显式传入 resume_from_checkpoint，确保 optimizer/scheduler/global_step 等状态被正确恢复
+    # （仅在 TrainingArguments/SFTConfig 里设置有时不会触发完整恢复，取决于 transformers/trl 版本）
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
     # 保存 LoRA adapter
     trainer.model.save_pretrained(str(out_dir))

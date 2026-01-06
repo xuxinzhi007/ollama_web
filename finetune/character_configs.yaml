@@ -26,6 +26,52 @@ characters:
       lora_dropout: 0.1                        # 保持dropout
       base_model: "Qwen/Qwen2.5-0.5B-Instruct"  # 修正模型名称，与实际训练一致
 
+    # 推理/导入 Ollama 的配置（可按角色单独调整）
+    # 注意：修改这里会影响“导入后的表现”，但不会影响训练过程本身。
+    inference_params:
+      # 稍微放开一点点，让表达更自然，但仍然稳（减少“人机感/模板感”）
+      temperature: 0.65
+      top_p: 0.92
+      top_k: 40
+      repeat_penalty: 1.08
+      num_predict: 420
+      stop:
+        - "<|im_end|>"
+
+    # 角色在推理阶段的规则（写在 SYSTEM 里，方便你调整，不必改代码）
+    system_prompt_rules: |
+      输出规则：
+      1) 你必须用第一人称，以角色口吻与用户对话。
+      2) 禁止输出：题目、答案、解析、判断题、选择题、A/B/C/D 选项、填空题、材料分析等应试内容。
+      3) 禁止输出：system/user/assistant 等角色标签或提示词格式。
+      4) 先直接回答用户问题，再补充情绪/动作/心理活动（不要绕圈子）。
+      5) 你的回答必须具体、可理解：至少 2 句话；禁止只回“嗯/温柔/希望/就是……”这种单词或碎片。
+      6) 如果没听懂用户在问什么，必须先反问澄清（例如“你是想问我擅长什么，还是想让我陪你聊什么？”）。
+      7) 当用户追问“说清楚/做什么/叫什么/你叫什么/啥”这类问题时，必须明确说清楚，不能用“再等一下/比如…/嗯…”敷衍。
+      8) 动作描写要克制：每条回复最多 0~1 个括号动作；不要频繁“握手/拥抱/贴近”，除非用户明确提出。
+      9) 语言要像真实人在说话：少用重复模板句（例如“不用麻烦…”反复出现），多用自然句子。
+      10) 遇到客观问题（如数学、时间、常识）：必须先给出准确答案；不要胡编。
+         例如：用户问“1+1等于几”，你要回答“2”，然后再用林栀口吻补一句也可以。
+
+    # （可选）自定义 Ollama 模板。一般不需要改；除非你清楚自己在做什么。
+    # 不填则使用内置的 Qwen2 <|im_start|>/<|im_end|> 模板。
+    # ollama_template: |
+    #   {{- if .System -}}<|im_start|>system
+    #   {{ .System }}<|im_end|>
+    #   {{- else -}}<|im_start|>system
+    #   You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
+    #   {{- end -}}
+    #   {{- range .Messages }}
+    #   {{- if eq .Role "system" }}<|im_start|>system
+    #   {{ .Content }}<|im_end|>
+    #   {{- else if eq .Role "user" }}<|im_start|>user
+    #   {{ .Content }}<|im_end|>
+    #   {{- else if eq .Role "assistant" }}<|im_start|>assistant
+    #   {{ .Content }}<|im_end|>
+    #   {{- end }}
+    #   {{- end }}
+    #   <|im_start|>assistant
+
   # 林栀快速版 - 用于测试
   linzhi_quick:
     name: "林栀(测试版)"
@@ -67,3 +113,13 @@ global_settings:
   output_base_dir: "out"
   cache_dir: ".cache"
   log_level: "INFO"
+
+  # 全局默认推理参数（角色未配置 inference_params 时使用）
+  inference_defaults:
+    temperature: 0.5
+    top_p: 0.9
+    top_k: 40
+    repeat_penalty: 1.15
+    num_predict: 256
+    stop:
+      - "<|im_end|>"
