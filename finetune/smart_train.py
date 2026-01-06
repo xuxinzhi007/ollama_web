@@ -17,7 +17,6 @@
 import os
 import sys
 import argparse
-import yaml
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -29,11 +28,17 @@ class SmartTrainer:
         self.root_dir = Path(__file__).parent
         self.datasets_dir = self.root_dir / "datasets"
         self.config_file = self.root_dir / "character_configs.yaml"
-        self.config = self._load_config()
+        self.config = None  # 延迟加载配置
+
+    def _ensure_config_loaded(self):
+        """确保配置已加载"""
+        if self.config is None:
+            self.config = self._load_config()
 
     def _load_config(self) -> Dict:
         """加载角色配置"""
         try:
+            import yaml
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except FileNotFoundError:
@@ -45,6 +50,7 @@ class SmartTrainer:
 
     def check_model_cache(self):
         """检查模型缓存状态"""
+        self._ensure_config_loaded()
         try:
             from model_cache import print_cache_status
 
@@ -152,6 +158,7 @@ class SmartTrainer:
 
     def list_configurations(self):
         """列出所有可用的角色配置"""
+        self._ensure_config_loaded()
         print("\n📋 可用角色配置:")
         print("=" * 50)
 
@@ -199,6 +206,7 @@ class SmartTrainer:
 
     def auto_match_files(self, character: str) -> Tuple[Optional[str], Optional[str]]:
         """自动匹配角色的训练和验证文件"""
+        self._ensure_config_loaded()
         dataset_info = self.scan_datasets()
 
         # 首先检查配置文件中指定的路径
@@ -247,6 +255,7 @@ class SmartTrainer:
 
     def interactive_select(self) -> str:
         """交互式选择角色"""
+        self._ensure_config_loaded()
         dataset_info = self.scan_datasets()
         characters = list(self.config.get('characters', {}).keys())
 
@@ -318,6 +327,7 @@ class SmartTrainer:
 
     def check_prerequisites(self, character: str) -> bool:
         """检查训练前置条件"""
+        self._ensure_config_loaded()
         print(f"\n🔍 检查 {character} 的训练前置条件...")
 
         # 检查角色配置
@@ -434,16 +444,169 @@ class SmartTrainer:
         print("\n🔍 系统状态检查:")
         print("1) 检查模型缓存")
         print("2) 检查训练环境")
-        print("3) 查看磁盘使用")
+        print("3) 全面环境诊断")  # 新增
+        print("4) 环境设置助手")   # 新增
+        print("5) 查看磁盘使用")
 
-        choice = input("选择 (1-3): ").strip()
+        choice = input("选择 (1-5): ").strip()
 
         if choice == "1":
             self.check_model_cache()
         elif choice == "2":
             self._check_training_environment()
         elif choice == "3":
+            self._comprehensive_environment_check()  # 新增
+        elif choice == "4":
+            self._environment_setup_helper()  # 新增
+        elif choice == "5":
             self._check_disk_usage()
+
+    def _comprehensive_environment_check(self):
+        """全面环境诊断"""
+        issues = self._check_environment_comprehensive()
+
+        if not issues:
+            print("\n🎉 环境检查完成 - 所有检查通过！")
+        else:
+            print(f"\n⚠️  发现 {len(issues)} 个环境问题")
+            print("\n💡 解决建议:")
+
+            if 'python_version' in issues:
+                print("   • Python版本: 请升级到3.10+")
+            if 'virtual_env' in issues:
+                print("   • 虚拟环境: 运行 python smart_train.py --setup 创建环境")
+            if 'dependencies' in issues:
+                print("   • 依赖包: 运行 pip install -r requirements.txt")
+            if 'ollama' in issues:
+                print("   • Ollama服务: 访问 https://ollama.com/ 安装")
+
+            print(f"\n🛠️  快速修复: python smart_train.py --setup")
+
+    def _environment_setup_helper(self):
+        """环境设置助手"""
+        print("\n🛠️  环境设置助手")
+        print("=" * 40)
+
+        print("1) 🔧 自动环境准备 (推荐)")
+        print("2) 📋 手动设置指南")
+        print("3) 🔍 问题诊断")
+        print("4) 🔄 重置环境")
+
+        choice = input("\n选择操作 (1-4): ").strip()
+
+        if choice == "1":
+            # 自动环境准备
+            issues = self._check_environment_comprehensive()
+            if not issues:
+                print("\n✅ 环境已经准备好了！")
+            else:
+                confirm = input("\n检测到环境问题，是否自动修复? (Y/n): ").strip().lower()
+                if confirm in ['', 'y', 'yes']:
+                    self._auto_setup_environment(issues)
+
+        elif choice == "2":
+            # 手动设置指南
+            self._show_manual_setup_guide()
+
+        elif choice == "3":
+            # 问题诊断
+            self._diagnose_environment_issues()
+
+        elif choice == "4":
+            # 重置环境
+            self._reset_environment()
+
+    def _show_manual_setup_guide(self):
+        """显示手动设置指南"""
+        print("\n📋 手动环境设置指南")
+        print("=" * 40)
+
+        print("\n1️⃣ 创建虚拟环境:")
+        print("   python3 -m venv .venv")
+
+        print("\n2️⃣ 激活虚拟环境:")
+        import platform
+        if platform.system() == 'Windows':
+            print("   .venv\\Scripts\\activate")
+        else:
+            print("   source .venv/bin/activate")
+
+        print("\n3️⃣ 安装依赖:")
+        print("   pip install -U pip")
+        print("   pip install -r requirements.txt")
+
+        print("\n4️⃣ 验证安装:")
+        print("   python smart_train.py --env-check")
+
+        print("\n5️⃣ 安装Ollama (可选):")
+        print("   访问 https://ollama.com/ 下载安装")
+
+    def _diagnose_environment_issues(self):
+        """诊断环境问题"""
+        print("\n🔍 环境问题诊断")
+        print("=" * 40)
+
+        issues = self._check_environment_comprehensive()
+
+        if not issues:
+            print("\n✅ 没有发现问题！环境配置良好。")
+            return
+
+        print(f"\n🔧 诊断结果和解决方案:")
+
+        for issue in issues:
+            if issue == 'python_version':
+                print(f"\n❌ Python版本问题:")
+                print(f"   当前版本过低，需要Python 3.10+")
+                self._show_python_upgrade_guide()
+
+            elif issue == 'virtual_env':
+                print(f"\n❌ 虚拟环境问题:")
+                print(f"   未检测到虚拟环境")
+                print(f"   解决方案: python3 -m venv .venv")
+
+            elif issue == 'dependencies':
+                print(f"\n❌ 依赖包问题:")
+                print(f"   训练依赖未完整安装")
+                print(f"   解决方案: pip install -r requirements.txt")
+
+            elif issue == 'ollama':
+                print(f"\n⚠️  Ollama服务问题:")
+                print(f"   Ollama未安装或不可用")
+                print(f"   解决方案: 访问 https://ollama.com/ 安装")
+                print(f"   注意: Ollama不是训练必需的，只在导入模型时需要")
+
+    def _reset_environment(self):
+        """重置环境"""
+        print("\n🔄 环境重置")
+        print("=" * 40)
+
+        print("⚠️  这将删除现有的虚拟环境并重新创建")
+        confirm = input("确认要重置环境吗? (y/N): ").strip().lower()
+
+        if confirm in ['y', 'yes']:
+            import shutil
+
+            # 删除现有虚拟环境
+            if Path('.venv').exists():
+                print("🗑️  删除现有虚拟环境...")
+                shutil.rmtree('.venv')
+                print("   ✅ 删除完成")
+
+            # 重新创建环境
+            print("🔧 重新创建环境...")
+            if self._create_virtual_environment():
+                print("   ✅ 虚拟环境创建成功")
+
+                if self._install_dependencies():
+                    print("   ✅ 依赖安装完成")
+                    print("\n🎉 环境重置完成！")
+                else:
+                    print("   ❌ 依赖安装失败")
+            else:
+                print("   ❌ 虚拟环境创建失败")
+        else:
+            print("👋 重置已取消")
 
     def _menu_ollama_management(self):
         """菜单：Ollama管理"""
@@ -467,6 +630,7 @@ class SmartTrainer:
 
     def start_training(self, character: str, background: bool = False, export_ollama: bool = False, ollama_name: str = None):
         """启动训练"""
+        self._ensure_config_loaded()
         print(f"\n🚀 启动 {character} 的LoRA训练...")
 
         # 获取角色配置
@@ -757,6 +921,314 @@ SYSTEM \"你是{character}，请保持角色特征进行对话。\"
         except Exception as e:
             print(f"   ❌ 环境检查失败: {e}")
 
+    def first_time_setup(self):
+        """首次运行引导设置"""
+        print("🚀 LoRA智能训练系统 - 首次运行检测")
+        print("=" * 50)
+
+        # 全面环境检测
+        issues = self._check_environment_comprehensive()
+
+        if not issues:
+            print("\n🎉 环境检查完成 - 所有检查通过！")
+            print("现在可以开始使用训练系统了！\n")
+            self.show_main_menu()
+            return
+
+        # 显示问题和解决方案
+        print(f"\n⚠️  发现 {len(issues)} 个环境问题，需要初始化设置")
+        print("\n📋 推荐操作流程：")
+        if 'python_version' in issues:
+            print("1️⃣ 升级Python版本 (必需)")
+        if 'virtual_env' in issues:
+            print("1️⃣ 创建虚拟环境并安装依赖 (必需)")
+        if 'dependencies' in issues:
+            print("2️⃣ 安装训练依赖 (必需)")
+        if 'ollama' in issues:
+            print("3️⃣ 安装Ollama服务 (训练完成后导入模型需要)")
+
+        try:
+            # 询问是否自动修复
+            if 'python_version' in issues:
+                print("\n❌ Python版本过低，请先升级Python再运行")
+                self._show_python_upgrade_guide()
+                return
+
+            confirm = input("\n是否立即进行环境初始化? (Y/n): ").strip().lower()
+            if confirm in ['', 'y', 'yes']:
+                success = self._auto_setup_environment(issues)
+                if success:
+                    print("\n🎉 环境准备完成！")
+
+                    cont = input("继续进入训练系统? (Y/n): ").strip().lower()
+                    if cont in ['', 'y', 'yes']:
+                        self.show_main_menu()
+                else:
+                    print("\n⚠️  环境准备遇到问题，请查看上方错误信息")
+                    print("可以尝试手动解决问题后重新运行")
+            else:
+                print("\n💡 您可以稍后使用以下命令进行环境准备：")
+                print("   python smart_train.py --setup")
+
+        except (KeyboardInterrupt, EOFError):
+            print("\n\n👋 设置已取消")
+
+    def _check_environment_comprehensive(self):
+        """全面环境检查"""
+        print("\n🔍 正在检查运行环境...")
+
+        issues = []
+
+        # 1. 系统平台检测
+        import platform
+        system = platform.system()
+        print(f"   💻 操作系统: {system} {platform.release()}")
+
+        # 2. Python版本检查
+        python_status = self._check_python_version()
+        if not python_status['compatible']:
+            issues.append('python_version')
+
+        # 3. 虚拟环境检测
+        venv_status = self._check_virtual_environment()
+        if not venv_status['active'] and not venv_status['exists']:
+            issues.append('virtual_env')
+        elif venv_status['exists'] and not venv_status['active']:
+            print(f"   💡 提示: 检测到虚拟环境但未激活，请运行: source .venv/bin/activate")
+
+        # 4. 依赖检查（只有在虚拟环境激活时才检查）
+        if venv_status['active'] or not Path('.venv').exists():
+            deps_status = self._check_dependencies_simple()
+            if deps_status['missing']:
+                issues.append('dependencies')
+        else:
+            print(f"   📚 训练依赖: 需要激活虚拟环境后检查")
+
+        # 5. Ollama服务检测
+        ollama_status = self._check_ollama_service()
+        if not ollama_status['available']:
+            issues.append('ollama')
+
+        return issues
+
+    def _check_python_version(self):
+        """检查Python版本"""
+        import sys
+
+        version = sys.version_info
+        version_str = f"{version.major}.{version.minor}.{version.micro}"
+
+        # 要求Python >= 3.10
+        compatible = version.major >= 3 and version.minor >= 10
+
+        if compatible:
+            print(f"   🐍 Python: {version_str} ✅")
+        else:
+            print(f"   🐍 Python: {version_str} ❌ (需要 ≥ 3.10)")
+
+        return {
+            'compatible': compatible,
+            'version': version_str,
+            'major': version.major,
+            'minor': version.minor
+        }
+
+    def _check_virtual_environment(self):
+        """检查虚拟环境状态"""
+        import sys
+
+        # 检查是否在虚拟环境中
+        in_venv = (hasattr(sys, 'real_prefix') or
+                   (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix))
+
+        venv_exists = Path('.venv').exists()
+
+        if in_venv and venv_exists:
+            print(f"   📦 虚拟环境: 已激活 ✅")
+        elif venv_exists:
+            print(f"   📦 虚拟环境: 存在但未激活 ⚠️")
+        elif in_venv:
+            print(f"   📦 虚拟环境: 在其他虚拟环境中 ⚠️")
+        else:
+            print(f"   📦 虚拟环境: 不存在 ❌")
+
+        return {
+            'active': in_venv,
+            'exists': venv_exists,
+            'path': Path('.venv').resolve() if venv_exists else None
+        }
+
+    def _check_dependencies_simple(self):
+        """简单依赖检查"""
+        required_libs = ['torch', 'transformers', 'peft', 'trl', 'datasets']
+        missing = []
+        installed = []
+
+        for lib in required_libs:
+            try:
+                module = __import__(lib)
+                version = getattr(module, '__version__', 'unknown')
+                print(f"   📚 {lib}: {version} ✅")
+                installed.append(lib)
+            except ImportError:
+                print(f"   📚 {lib}: 未安装 ❌")
+                missing.append(lib)
+
+        return {
+            'missing': missing,
+            'installed': installed
+        }
+
+    def _check_ollama_service(self):
+        """检查Ollama服务状态"""
+        try:
+            result = subprocess.run(['ollama', '--version'],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                version = result.stdout.strip().split()[-1] if result.stdout.strip() else "未知版本"
+                print(f"   🤖 Ollama服务: {version} ✅")
+                return {'available': True, 'version': version}
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+            print(f"   🤖 Ollama服务: 未安装 ⚠️ (训练后导入模型需要)")
+
+        return {'available': False, 'version': None}
+
+    def _show_python_upgrade_guide(self):
+        """显示Python升级指南"""
+        import platform
+        system = platform.system().lower()
+
+        print(f"\n💡 Python升级指南:")
+        if 'darwin' in system:  # macOS
+            print("   # macOS (推荐使用Homebrew)")
+            print("   brew install python@3.11")
+            print("   # 或使用pyenv")
+            print("   brew install pyenv")
+            print("   pyenv install 3.11.5")
+            print("   pyenv global 3.11.5")
+        elif 'linux' in system:  # Linux
+            print("   # Ubuntu/Debian")
+            print("   sudo apt update")
+            print("   sudo apt install python3.11 python3.11-venv python3.11-pip")
+            print("   # CentOS/RHEL")
+            print("   sudo yum install python3.11")
+        elif 'windows' in system:  # Windows
+            print("   # Windows")
+            print("   1. 访问 https://www.python.org/downloads/")
+            print("   2. 下载Python 3.11+安装包")
+            print("   3. 安装时勾选 'Add Python to PATH'")
+
+        print(f"\n然后重新运行: python3.11 smart_train.py")
+
+    def _auto_setup_environment(self, issues):
+        """自动环境设置"""
+        print(f"\n🔧 开始环境初始化...")
+
+        success = True
+
+        # 1. 创建虚拟环境
+        if 'virtual_env' in issues:
+            print(f"\n1️⃣ 创建虚拟环境...")
+            if self._create_virtual_environment():
+                print(f"   ✅ 虚拟环境创建成功: .venv/")
+            else:
+                print(f"   ❌ 虚拟环境创建失败")
+                success = False
+                return False
+
+        # 2. 安装依赖
+        if 'dependencies' in issues or 'virtual_env' in issues:
+            print(f"\n2️⃣ 安装训练依赖...")
+            if self._install_dependencies():
+                print(f"   ✅ 依赖安装完成")
+            else:
+                print(f"   ❌ 依赖安装失败")
+                success = False
+
+        # 3. 验证环境
+        if success:
+            print(f"\n3️⃣ 验证环境...")
+            issues_after = self._check_environment_comprehensive()
+            # 忽略ollama问题，因为不是必需的
+            critical_issues = [i for i in issues_after if i != 'ollama']
+            if not critical_issues:
+                print(f"   ✅ 环境验证通过")
+            else:
+                print(f"   ⚠️  仍有问题: {', '.join(critical_issues)}")
+                success = False
+
+        # 4. Ollama提示
+        if 'ollama' in issues:
+            print(f"\n💡 关于Ollama服务：")
+            print(f"   训练完成后需要Ollama来使用模型")
+            print(f"   安装方法: https://ollama.com/")
+            print(f"   也可以训练完成后再安装")
+
+        return success
+
+    def _create_virtual_environment(self):
+        """创建虚拟环境"""
+        try:
+            # 使用当前Python创建虚拟环境
+            result = subprocess.run([sys.executable, '-m', 'venv', '.venv'],
+                                  capture_output=True, text=True, timeout=60)
+            return result.returncode == 0
+        except Exception as e:
+            print(f"   创建虚拟环境时出错: {e}")
+            return False
+
+    def _install_dependencies(self):
+        """安装依赖"""
+        try:
+            # 确定python可执行文件路径
+            if Path('.venv').exists():
+                if sys.platform == 'win32':
+                    python_exe = Path('.venv/Scripts/python.exe')
+                else:
+                    python_exe = Path('.venv/bin/python')
+            else:
+                python_exe = Path(sys.executable)
+
+            if not python_exe.exists():
+                print(f"   ❌ Python可执行文件不存在: {python_exe}")
+                return False
+
+            # 升级pip
+            print(f"   📦 升级pip工具...")
+            result = subprocess.run([str(python_exe), '-m', 'pip', 'install', '-U', 'pip'],
+                                  capture_output=True, text=True, timeout=120)
+
+            if result.returncode != 0:
+                print(f"   ⚠️  pip升级失败: {result.stderr}")
+
+            # 安装requirements.txt
+            if Path('requirements.txt').exists():
+                print(f"   📦 安装训练依赖...")
+                result = subprocess.run([str(python_exe), '-m', 'pip', 'install', '-r', 'requirements.txt'],
+                                      capture_output=True, text=True, timeout=300)
+
+                if result.returncode == 0:
+                    return True
+                else:
+                    print(f"   ❌ 依赖安装失败:")
+                    print(f"   {result.stderr}")
+
+                    # 提供解决方案
+                    print(f"\n   💡 可能的解决方案:")
+                    print(f"   1) 网络问题 - 使用国内镜像:")
+                    print(f"      {python_exe} -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt")
+                    print(f"   2) 手动安装:")
+                    print(f"      {python_exe} -m pip install torch transformers peft trl datasets")
+                    return False
+            else:
+                print(f"   ❌ requirements.txt 文件不存在")
+                return False
+
+        except Exception as e:
+            print(f"   安装依赖时出错: {e}")
+            return False
+
     def _check_disk_usage(self):
         """检查磁盘使用情况"""
         print("\n💽 磁盘使用情况...")
@@ -789,6 +1261,7 @@ SYSTEM \"你是{character}，请保持角色特征进行对话。\"
 
     def _import_to_ollama(self):
         """导入模型到Ollama"""
+        self._ensure_config_loaded()
         print("\n🚀 导入模型到Ollama")
 
         # 扫描可用的合并模型
@@ -911,9 +1384,52 @@ def main():
     parser.add_argument("--ollama", "-o", action="store_true", help="训练后导入到Ollama")
     parser.add_argument("--ollama_name", type=str, help="指定Ollama模型名称")
 
+    # 新增环境管理参数
+    parser.add_argument("--setup", action="store_true", help="环境初始化设置")
+    parser.add_argument("--env-check", action="store_true", help="全面环境检查")
+    parser.add_argument("--auto", action="store_true", help="自动模式，跳过用户确认")
+
     args = parser.parse_args()
 
     trainer = SmartTrainer()
+
+    # 首次运行检测：无参数且无虚拟环境时进入引导模式
+    if not any(vars(args).values()) and not Path('.venv').exists():
+        print("🔍 检测到首次运行...")
+        trainer.first_time_setup()
+        return
+
+    # 处理新的环境管理参数
+    if args.setup:
+        print("🔧 环境初始化设置")
+        issues = trainer._check_environment_comprehensive()
+
+        if not issues:
+            print("\n✅ 环境已经准备好了！")
+            if not args.auto:
+                cont = input("是否进入主菜单? (Y/n): ").strip().lower()
+                if cont in ['', 'y', 'yes']:
+                    trainer.show_main_menu()
+        else:
+            if args.auto:
+                success = trainer._auto_setup_environment(issues)
+                if success:
+                    print("\n🎉 环境准备完成！")
+                    trainer.show_main_menu()
+            else:
+                confirm = input("\n检测到环境问题，是否自动修复? (Y/n): ").strip().lower()
+                if confirm in ['', 'y', 'yes']:
+                    success = trainer._auto_setup_environment(issues)
+                    if success:
+                        print("\n🎉 环境准备完成！")
+                        cont = input("是否进入主菜单? (Y/n): ").strip().lower()
+                        if cont in ['', 'y', 'yes']:
+                            trainer.show_main_menu()
+        return
+
+    if args.env_check:
+        trainer._comprehensive_environment_check()
+        return
 
     # 处理命令行参数
     if args.menu:
