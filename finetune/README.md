@@ -42,6 +42,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+> 提示：为了支持“自动转 GGUF 并导入 Ollama”，脚本可能会在导入阶段自动安装 `sentencepiece`（用于 `llama.cpp` 的 `convert_hf_to_gguf.py` 写入词表）。  
+> macOS 上通常会直接安装 wheel；如果你的环境限制网络/编译，会提示手动安装方式。
+
 **注意**: `requirements.txt` 包含所有必需依赖，包括：
 - `torch` - PyTorch深度学习框架（必需）
 - `transformers` - HuggingFace模型库（必需）
@@ -245,6 +248,14 @@ finetune/
 4) 👋 退出系统
 ```
 
+### 🤖 导入 Ollama（GGUF + 覆盖策略）
+
+- **首次导入**：如果 `out/merged_<角色>/` 下没有 `.gguf`，系统会自动下载 `llama.cpp` 源码（无需编译），并自动把 HuggingFace merged 权重转换成 `角色名.gguf`，然后执行 `ollama create`。
+- **重复导入**：如果 Ollama 已存在同名模型，会询问是否覆盖；选择覆盖会先 `ollama rm` 再重新导入，避免跑到旧模型。
+- **重要**：如果你重新训练了模型，`角色名.gguf` 可能过期。系统会自动检测 GGUF 是否比 `model.safetensors` 更旧，若过期会自动重建 GGUF。
+
+> 修改 `character_configs.yaml` 的 `inference_params` / `system_prompt_rules` 后，需要重新“导入到Ollama”一次才会生效（因为这些会写入 Modelfile）。
+
 **快速训练+导入:**
 
 **macOS/Linux:**
@@ -394,7 +405,7 @@ pip install -r requirements.txt
 
 ## 🚨 重要提醒
 
-- **训练完成后要在 Ollama 使用，需要先准备 GGUF**：没有 `.gguf` 时，脚本会提示你先用 `llama.cpp` 的 `convert_hf_to_gguf.py` 转换
+- **训练完成后要在 Ollama 使用，需要 GGUF**：现在脚本会自动下载 `llama.cpp` 并转换；若转换失败会给出手动命令
 - 同时只运行一个训练任务，避免资源冲突
 - 训练前运行 `./train --cache` 确认模型已缓存
 - 使用 `./train linzhi_quick` 先做快速测试
