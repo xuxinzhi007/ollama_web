@@ -19,12 +19,12 @@ characters:
 
     # 训练参数
     training_params:
-      epochs: 3.0
-      learning_rate: 3e-4
-      lora_r: 64
-      lora_alpha: 128
+      epochs: 5.0                              # 增加训练轮数，更充分学习
+      learning_rate: 1e-4                      # 降低学习率，更稳定
+      lora_r: 32                               # 减少参数量，防止过拟合
+      lora_alpha: 64                           # 对应调整
       lora_dropout: 0.1
-      base_model: "Qwen/Qwen2.5-0.5B"
+      base_model: "Qwen/Qwen2.5-0.5B-Instruct"  # 修正模型名称，与实际训练一致
 
   # 林栀快速版 - 用于测试
   linzhi_quick:
@@ -35,12 +35,12 @@ characters:
       val: "datasets/linzhi/val.jsonl"
     system_prompt: "你是林栀，温柔害羞的女孩。说话轻声细语，容易脸红。"
     training_params:
-      epochs: 1.0
-      learning_rate: 3e-4
-      lora_r: 32
-      lora_alpha: 64
+      epochs: 2.0                              # 快速版适中的训练轮数
+      learning_rate: 1e-4                      # 统一使用稳定的学习率
+      lora_r: 16                               # 小数据集用更小的rank
+      lora_alpha: 32                           # 对应调整
       lora_dropout: 0.1
-      base_model: "Qwen/Qwen2.5-0.5B"
+      base_model: "Qwen/Qwen2.5-0.5B-Instruct"  # 修正模型名称一致性
 
   # 留空给未来的新角色
   # xiaoxue:

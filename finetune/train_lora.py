@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--no_eval", action="store_true")
     ap.add_argument("--gradient_checkpointing", action="store_true")
     ap.add_argument("--report_to", type=str, default="none", help="none|tensorboard|wandb 等")
+    ap.add_argument("--resume_from_checkpoint", type=str, help="从指定检查点继续训练")
 
     return ap.parse_args()
 
@@ -206,6 +207,7 @@ def main() -> None:
         dataloader_pin_memory=(plan.device == "cuda"),
         max_seq_length=max_seq_len,
         packing=False,
+        resume_from_checkpoint=args.resume_from_checkpoint,
     )
 
     trainer = SFTTrainer(

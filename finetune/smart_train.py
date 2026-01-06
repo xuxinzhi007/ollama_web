@@ -648,6 +648,22 @@ class SmartTrainer:
         # 获取训练参数
         training_params = char_config.get('training_params', {})
 
+        # 检查是否已有训练结果并处理用户选择
+        choice = self.handle_existing_training_choice(character)
+        if choice == "cancel":
+            return
+
+        resume_from_checkpoint = None
+        if choice == "resume":
+            # 断点续训模式
+            lora_dir = Path(f"out/lora_{character}")
+            checkpoint_files = list(lora_dir.glob('checkpoint-*'))
+            if checkpoint_files:
+                # 找到最新的checkpoint
+                latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
+                resume_from_checkpoint = str(latest_checkpoint)
+                print(f"📍 将从检查点继续训练: {latest_checkpoint.name}")
+
         # 构建训练命令
         cmd = [
             sys.executable, "train_lora.py",
@@ -670,6 +686,10 @@ class SmartTrainer:
             cmd.extend(["--lora_alpha", str(training_params['lora_alpha'])])
         if 'lora_dropout' in training_params:
             cmd.extend(["--lora_dropout", str(training_params['lora_dropout'])])
+
+        # 断点续训参数
+        if resume_from_checkpoint:
+            cmd.extend(["--resume_from_checkpoint", resume_from_checkpoint])
 
         # 默认参数
         cmd.extend([
@@ -813,11 +833,16 @@ class SmartTrainer:
         print(f"📁 模型路径: {merged_dir}")
         print(f"📦 模型大小: {sum(f.stat().st_size for f in merged_dir.glob('*')) / (1024**3):.1f} GB")
 
-        # 创建Ollama Modelfile (使用绝对路径)
+        # 创建Ollama Modelfile (使用绝对路径和完整角色配置)
+        self._ensure_config_loaded()
+        char_config = self.config.get('characters', {}).get(character, {})
+        system_prompt = char_config.get('system_prompt', f'你是{character}，请保持角色特征进行对话。')
+
         modelfile_content = f"""FROM {merged_dir}
-PARAMETER temperature 0.7
-PARAMETER top_p 0.9
-SYSTEM \"你是{character}，请保持角色特征进行对话。\"
+PARAMETER temperature 0.3
+PARAMETER top_p 0.8
+PARAMETER top_k 40
+SYSTEM \"\"\"{system_prompt}\"\"\"
 """
 
         try:
@@ -1348,7 +1373,7 @@ SYSTEM \"你是{character}，请保持角色特征进行对话。\"
 
     def _confirm_and_train(self, character: str):
         """确认并开始训练"""
-        print(f"\n💡 即将开始训练 '{character}'")
+        print(f"\n💡 准备训练 '{character}'")
 
         # 询问是否导出到Ollama
         export_ollama = False
@@ -1362,14 +1387,155 @@ SYSTEM \"你是{character}，请保持角色特征进行对话。\"
                 if not ollama_name:
                     ollama_name = f"{character}-lora"
 
-            confirm = input("确认开始训练? (y/N): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                self.start_training(character, export_ollama=export_ollama, ollama_name=ollama_name)
-            else:
-                print("👋 训练已取消")
+            # 直接调用start_training，它会自动检测并处理已有训练结果
+            self.start_training(character, export_ollama=export_ollama, ollama_name=ollama_name)
 
         except (KeyboardInterrupt, EOFError):
             print("\n👋 训练已取消")
+
+    def check_existing_training(self, character: str):
+        """检查是否已有训练结果"""
+        lora_dir = Path(f"out/lora_{character}")
+        merged_dir = Path(f"out/merged_{character}")
+
+        result = {
+            'has_lora': lora_dir.exists(),
+            'has_merged': merged_dir.exists(),
+            'lora_dir': lora_dir,
+            'merged_dir': merged_dir
+        }
+
+        if result['has_lora'] or result['has_merged']:
+            # 获取训练时间信息
+            if result['has_lora']:
+                try:
+                    # 查找最新的checkpoint文件获取训练时间
+                    checkpoint_files = list(lora_dir.glob('checkpoint-*'))
+                    if checkpoint_files:
+                        latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
+                        result['last_checkpoint'] = latest_checkpoint.name
+                        result['train_time'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest_checkpoint.stat().st_mtime))
+
+                    # 读取训练元数据
+                    meta_file = lora_dir / "run_meta.json"
+                    if meta_file.exists():
+                        import json
+                        with open(meta_file, 'r', encoding='utf-8') as f:
+                            meta = json.load(f)
+                            result['training_params'] = meta.get('args', {})
+                            result['env_info'] = meta.get('env_plan', {})
+                except Exception:
+                    pass
+
+            if result['has_merged']:
+                try:
+                    result['merged_time'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(merged_dir.stat().st_mtime))
+                    # 计算模型大小
+                    total_size = sum(f.stat().st_size for f in merged_dir.glob('*') if f.is_file())
+                    result['merged_size'] = f"{total_size / (1024**3):.1f} GB"
+                except Exception:
+                    result['merged_size'] = "未知"
+
+        return result
+
+    def backup_existing_training(self, character: str):
+        """备份现有训练结果"""
+        import shutil
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        lora_dir = Path(f"out/lora_{character}")
+        merged_dir = Path(f"out/merged_{character}")
+        backup_base = f"out/backup_{character}_{timestamp}"
+
+        backup_info = {}
+
+        if lora_dir.exists():
+            backup_lora = f"{backup_base}_lora"
+            shutil.move(str(lora_dir), backup_lora)
+            backup_info['lora'] = backup_lora
+            print(f"   📦 LoRA模型已备份到: {backup_lora}")
+
+        if merged_dir.exists():
+            backup_merged = f"{backup_base}_merged"
+            shutil.move(str(merged_dir), backup_merged)
+            backup_info['merged'] = backup_merged
+            print(f"   📦 合并模型已备份到: {backup_merged}")
+
+        return backup_info
+
+    def show_existing_training_info(self, character: str, existing_info: dict):
+        """显示现有训练结果信息"""
+        print(f"\n📋 发现 {character} 的现有训练结果:")
+        print("=" * 50)
+
+        if existing_info['has_lora']:
+            print(f"🔧 LoRA适配器: ✅ 存在")
+            if 'train_time' in existing_info:
+                print(f"   📅 训练时间: {existing_info['train_time']}")
+            if 'last_checkpoint' in existing_info:
+                print(f"   📊 最新检查点: {existing_info['last_checkpoint']}")
+            if 'training_params' in existing_info:
+                params = existing_info['training_params']
+                epochs = params.get('num_train_epochs', '未知')
+                lr = params.get('learning_rate', '未知')
+                print(f"   ⚙️  训练参数: epochs={epochs}, lr={lr}")
+
+        if existing_info['has_merged']:
+            print(f"🤖 合并模型: ✅ 存在")
+            if 'merged_time' in existing_info:
+                print(f"   📅 合并时间: {existing_info['merged_time']}")
+            if 'merged_size' in existing_info:
+                print(f"   📦 模型大小: {existing_info['merged_size']}")
+
+    def handle_existing_training_choice(self, character: str):
+        """处理已有训练结果的用户选择"""
+        existing_info = self.check_existing_training(character)
+
+        if not (existing_info['has_lora'] or existing_info['has_merged']):
+            return None  # 没有现有结果，正常训练
+
+        # 显示现有结果信息
+        self.show_existing_training_info(character, existing_info)
+
+        print(f"\n🤔 检测到已有训练结果，请选择处理方式:")
+        print("1) 🔄 重新训练 (覆盖现有结果)")
+        print("2) 📦 备份后重新训练 (保留现有结果)")
+        print("3) ➕ 继续训练 (断点续训，增加更多epochs)")
+        print("4) 🚫 取消训练")
+        print()
+
+        while True:
+            try:
+                choice = input("请选择 (1-4): ").strip()
+
+                if choice == "1":
+                    print("🔄 将覆盖现有训练结果...")
+                    return "overwrite"
+
+                elif choice == "2":
+                    print("📦 将备份现有结果后重新训练...")
+                    backup_info = self.backup_existing_training(character)
+                    print("✅ 备份完成，开始重新训练")
+                    return "backup_and_retrain"
+
+                elif choice == "3":
+                    print("➕ 将从最新检查点继续训练...")
+                    if not existing_info['has_lora']:
+                        print("❌ 未找到LoRA检查点，无法继续训练")
+                        print("   建议选择重新训练")
+                        continue
+                    return "resume"
+
+                elif choice == "4":
+                    print("🚫 训练已取消")
+                    return "cancel"
+
+                else:
+                    print("❌ 无效选择，请输入1-4")
+
+            except (KeyboardInterrupt, EOFError):
+                print("\n🚫 训练已取消")
+                return "cancel"
 
 def main():
     parser = argparse.ArgumentParser(description="智能LoRA训练脚本")
