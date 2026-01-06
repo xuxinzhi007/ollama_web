@@ -833,15 +833,25 @@ class SmartTrainer:
         print(f"📁 模型路径: {merged_dir}")
         print(f"📦 模型大小: {sum(f.stat().st_size for f in merged_dir.glob('*')) / (1024**3):.1f} GB")
 
-        # 创建Ollama Modelfile (使用绝对路径和完整角色配置)
+        # 创建Ollama Modelfile (使用完整角色配置和优化推理参数)
         self._ensure_config_loaded()
         char_config = self.config.get('characters', {}).get(character, {})
-        system_prompt = char_config.get('system_prompt', f'你是{character}，请保持角色特征进行对话。')
 
+        # 使用训练时的完整system_prompt，确保与训练数据一致
+        system_prompt = char_config.get('system_prompt', f'你是{character}，请保持角色特征进行对话。').strip()
+
+        # 获取角色的中文名称用于显示
+        char_name = char_config.get('name', character)
+
+        print(f"📝 角色配置: {char_name}")
+        print(f"📄 System Prompt: {system_prompt[:100]}..." if len(system_prompt) > 100 else f"📄 System Prompt: {system_prompt}")
+
+        # 优化推理参数，更适合角色扮演
         modelfile_content = f"""FROM {merged_dir}
-PARAMETER temperature 0.3
+PARAMETER temperature 0.7
 PARAMETER top_p 0.8
 PARAMETER top_k 40
+PARAMETER repeat_penalty 1.1
 SYSTEM \"\"\"{system_prompt}\"\"\"
 """
 

@@ -168,7 +168,36 @@ def main() -> None:
             out = (example.get("output") or "").strip()
             user = inst + ("\n\n" + inp if inp else "")
             messages = [{"role": "user", "content": user}, {"role": "assistant", "content": out}]
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+
+        # 对于Qwen模型，确保system消息被正确处理
+        # 检查是否包含system消息
+        has_system = any(msg.get("role") == "system" for msg in messages)
+
+        try:
+            # 尝试使用chat template
+            formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+
+            # 验证system消息是否被包含（简单检查）
+            if has_system:
+                system_content = next(msg["content"] for msg in messages if msg.get("role") == "system")
+                if system_content[:50] not in formatted:
+                    print(f"⚠️  警告：system消息可能未被正确处理")
+
+            return formatted
+        except Exception as e:
+            print(f"⚠️  Chat template处理失败，回退到简单格式: {e}")
+            # 回退：手动构建对话格式
+            result = ""
+            for msg in messages:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "system":
+                    result += f"<|system|>\n{content}\n"
+                elif role == "user":
+                    result += f"<|user|>\n{content}\n"
+                elif role == "assistant":
+                    result += f"<|assistant|>\n{content}\n"
+            return result
 
     # training args
     per_device_bs = int(plan.defaults["per_device_train_batch_size"])
