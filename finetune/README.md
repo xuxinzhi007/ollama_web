@@ -1,179 +1,154 @@
-# 🚀 LoRA 微调到 Ollama 工具包
+# 🚀 智能LoRA训练系统
+
+一键式LoRA微调到Ollama导入的完整解决方案，支持智能环境检测、自动文件匹配、实时训练监控。
+
+## ⚡ 快速开始
+
+**新用户首次运行**（自动环境设置）：
+```bash
+git clone <repository>
+cd finetune
+python smart_train.py  # 🎯 自动检测并引导环境设置
+```
+
+**日常使用**（统一入口）：
+```bash
+./train                    # 交互式选择角色训练
+./train linzhi            # 直接训练林栀角色
+./train linzhi --ollama   # 训练并导入Ollama
+```
 
 ## 📁 项目结构
 
 ```
-├── 📄 README.md                 ← 你在这里！
-├── 🚀 train_to_ollama.py        ← 🔥 主要工具：实时进度显示
-├── 🔧 train_lora.py             ← LoRA训练脚本
-├── 🔧 make_dataset.py           ← 数据集生成工具
-├── 🔧 env_detect.py             ← 环境检测
-├── 📄 requirements.txt          ← Python依赖
-├── 📄 ULTIMATE_GUIDE.md         ← 详细文档
+finetune/
+├── 📄 README.md                    ← 你在这里！
+├── 🚀 train                        ← 统一启动脚本（推荐）
+├── 🧠 smart_train.py              ← 智能训练主脚本
+├── 🔧 train_lora.py               ← LoRA训练引擎
+├── 📄 character_configs.yaml      ← 角色配置文件
+├── 📄 requirements.txt            ← Python依赖
 │
-├── 📂 data/                     ← 训练数据
-├── 📂 out/                      ← 训练输出
-├── 📂 scripts/                  ← 辅助工具
-│   └── ultimate_solution.py     ← 批量管理工具
-├── 📂 docs/                     ← 详细文档
-└── 📂 archive/                  ← 旧文件存档
+├── 📂 datasets/                   ← 训练数据
+│   ├── linzhi/                   ← 林栀数据集
+│   │   ├── train.jsonl           ← 训练数据(450样本)
+│   │   └── val.jsonl             ← 验证数据(50样本)
+│   └── archive/                  ← 历史数据
+├── 📂 out/                       ← 训练输出
+└── 📂 .venv/                     ← 虚拟环境
 ```
 
-## ⚡ 快速开始
+## 🎯 核心功能
 
-### 🔥 最简单方式（推荐）
+### 🔥 智能训练系统
+- ✅ **智能环境检测**：自动检查Python、依赖、Ollama服务
+- 📊 **自动文件匹配**：智能发现和匹配训练数据
+- ⏰ **实时进度显示**：训练过程可视化监控
+- 🎯 **一键导入Ollama**：训练完成自动导入使用
 
-#### 方法一：图形菜单（新手推荐）
+### 📱 完整功能菜单
 ```bash
-# 1. 激活环境
-source .venv/bin/activate
+./train --menu          # 完整功能菜单
 
-# 2. 运行图形菜单
-./quick_start.sh
-# 选择 "1) 一键训练新模型" 即可
+🚀 智能LoRA训练系统 - 主菜单
+1) 🎭 角色训练（智能文件匹配）
+2) 📊 数据集管理
+3) 🔍 系统状态检查
+4) 🤖 Ollama模型管理
+5) 🧪 模型测试
 ```
 
-#### 方法二：命令行（熟练用户）
+## 📋 使用指南
+
+### 🎭 可用角色
+
+**林栀（主角色）**: 450训练样本 + 50验证样本
+**林栀(测试版)**: 28训练样本，快速测试用
+
+### 🚀 训练流程
+
+**标准训练流程:**
 ```bash
-# 1. 激活环境
-source .venv/bin/activate
-
-# 2. 一键训练并导入到Ollama (实时进度显示)
-python train_to_ollama.py --ollama_name "my-awesome-bot"
-
-# 3. 测试模型
-ollama run my-awesome-bot
+./train linzhi               # 开始训练
 ```
 
-**就这么简单！现在可以看到实时进度！** 🎉
+**训练完成后会自动显示:**
+```
+🎉 训练完成！下一步操作
+✅ 模型已训练完成：linzhi
+📁 文件位置：out/merged_linzhi/
 
-## ✨ 主要特性
+⚠️  注意：模型目前还没有导入到Ollama，无法直接使用
 
-### 🔥 实时进度显示
-- ✅ **环境检查**：Python版本、虚拟环境、Ollama服务、GPU状态
-- 📊 **数据集验证**：自动检查训练数据，显示数据量、对话风格、训练目标
-- ⏰ **时间估算**：训练前显示预计耗时
-- 🔄 **实时输出**：训练过程中的实时log输出，不再"卡死"
-- 📍 **步骤提示**：清晰显示当前执行到第几步
-- 🎉 **完成统计**：显示总耗时和详细的测试命令
+📋 后续选项：
+1) 🚀 导入到Ollama（推荐）
+2) 📦 稍后导入
+3) 🏠 返回主菜单
+4) 👋 退出系统
+```
 
-### 📱 图形菜单功能
+**快速训练+导入:**
 ```bash
-./quick_start.sh
-# 新增功能：
-# 1) 一键训练（实时进度）
-# 2) 高级训练（自定义参数）
-# 3) 批量导入模型
-# 4) 查看当前模型
-# 5) 测试模型对话
-# 6) 清理旧模型
-# 7) 系统状态检查 ← 新增
+./train linzhi --ollama      # 训练后自动导入Ollama
 ```
 
-## 📋 常用操作
-
-### 🎯 训练新模型（实时进度显示）
+**快速测试:**
 ```bash
-# 基础训练（默认2轮）- 实时显示进度
-python train_to_ollama.py --ollama_name "helper-v1"
-
-# 自定义训练轮数 - 支持预估时间
-python train_to_ollama.py --ollama_name "helper-v2" --epochs 3.0
-
-# 跳过训练，只导入现有模型 - 详细状态信息
-python train_to_ollama.py --ollama_name "helper-v3" --skip_train --merged_dir "out/some_merged"
-
-# 或使用图形菜单
-./quick_start.sh
-# 选择对应选项，支持高级参数设置
+./train linzhi_quick         # 使用28样本快速测试
 ```
 
-### 🔄 批量管理
+### 🔧 系统管理
+
+**环境检查:**
 ```bash
-# 批量导入所有训练好的模型
-python scripts/ultimate_solution.py --batch
-
-# 导入单个模型并自定义
-python scripts/ultimate_solution.py --single "out/merged" --name "code-assistant" --system "你是编程专家"
+./train --env-check          # 全面环境诊断
+./train --setup             # 环境初始化设置
+./train --cache             # 检查模型缓存状态
 ```
 
-### 📊 查看和测试
+**数据管理:**
 ```bash
-# 查看所有模型
-ollama list
-
-# 测试模型
-echo "你好" | ollama run my-model
-
-# 删除不需要的模型
-ollama rm old-model
+./train --scan              # 扫描数据集状态
+./train --list              # 查看所有角色配置
 ```
 
-## 🛠️ 高级用法
+## 🛠️ 高级功能
 
-### 生成自定义数据集
-```bash
-# 生成300条训练数据
-python make_dataset.py --out_dir data --n 300
+### 💡 环境管理
+- **首次运行检测**：自动识别新用户并引导设置
+- **依赖自动安装**：智能检测并安装缺失的依赖
+- **跨平台支持**：Windows/macOS/Linux全平台兼容
+- **问题自动修复**：提供详细的解决方案
 
-# 生成1000条数据，验证集比例20%
-python make_dataset.py --n 1000 --val_ratio 0.2
-```
+### 🎯 训练优化
+- **智能参数调整**：根据数据量自动优化训练参数
+- **断点续训支持**：支持继续训练已有模型
+- **多格式数据支持**：自动识别不同格式的训练数据
+- **质量验证**：训练前验证数据格式和质量
 
-### 只训练不导入
-```bash
-# 只进行LoRA训练
-python train_lora.py --output_dir "out/my_experiment" --num_train_epochs 2.5
+### 🤖 Ollama集成
+- **一键导入**：训练完成自动导入Ollama
+- **智能命名**：自动生成合适的模型名称
+- **参数优化**：自动配置最佳推理参数
+- **模型管理**：查看、测试、删除Ollama模型
 
-# 后续手动导入
-python scripts/ultimate_solution.py --single "out/my_experiment_merged" --name "experiment-bot"
-```
+## ❓ 问题排查
 
-## ❓ 常见问题
-
-### Q: 训练失败了怎么办？
-```bash
-# 检查环境
-python env_detect.py
-
-# 重新安装依赖
-pip install -r requirements.txt
-```
-
-### Q: 模型在哪里？
-- 训练输出：`out/` 目录
-- Ollama模型：`ollama list` 查看
-
-### Q: 如何删除训练文件？
-```bash
-# 清理训练输出（保留重要的merged模型）
-rm -rf out/lora out/test out/quick_lora
-
-# 完全重新开始
-rm -rf out/ data/
-```
-
-### Q: 想要不同的模型性格？
-在 `train_to_ollama.py` 中修改系统提示，或使用：
-```bash
-python scripts/ultimate_solution.py --single "out/merged" --name "friendly-bot" \
-    --system "你是一个友好的AI助手，总是积极乐观。"
-```
+**数据找不到**: 运行 `./train --scan` 检查文件位置
+**配置问题**: 运行 `./train --list` 查看配置状态
+**环境问题**: 运行 `./train --env-check` 全面诊断
+**格式错误**: 检查JSONL文件每行都是有效JSON
 
 ## 🚨 重要提醒
 
-1. **虚拟环境**：始终在 `.venv` 环境中运行
-2. **磁盘空间**：每个模型约1GB，注意清理
-3. **GPU内存**：训练时注意显存使用
-4. **备份重要模型**：`out/merged` 包含完整模型
-
-## 📖 更多信息
-
-- 详细教程：`ULTIMATE_GUIDE.md`
-- 旧文档：`docs/` 目录
-- 问题排查：检查 `archive/` 中的旧脚本
+- **训练完成后需要导入Ollama才能使用** - 系统会自动提示选择
+- 同时只运行一个训练任务，避免资源冲突
+- 训练前运行 `./train --cache` 确认模型已缓存
+- 使用 `./train linzhi_quick` 先做快速测试
 
 ## 🎯 一句话总结
 
-**用 `train_to_ollama.py` 或 `./quick_start.sh` 就够了！** 实时进度显示，再也不用担心"卡死"！
+**用 `./train` 就够了！** 新用户自动引导设置，老用户一键训练导入！
 
+---
+**统一入口**: `./train` | **完整功能**: `./train --menu`
