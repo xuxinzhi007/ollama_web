@@ -1,0 +1,63 @@
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# OS / editor
+.DS_Store
+
+# Finetune artifacts & caches
+finetune/out/
+finetune/.hf/
+finetune/.cache/
+finetune/llama.cpp/
+
+# Model files (训练和合并产出)
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+*.ggml
+
+# Training checkpoints and states
+checkpoint-*/
+trainer_state.json
+training_args.bin
+run_meta.json
+optimizer.pt
+scheduler.pt
+rng_state.pth
+
+# Ollama model files
+Modelfile*
+*.ollama
+
+# Training data and logs (大文件)
+# 注意：如果需要保留小的样本数据，可以用 git add -f 强制添加
+finetune/data/*.jsonl
+*.log
+*.logs
+
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Optional local configs
+.env
+
+
