@@ -17,13 +17,13 @@ characters:
 
       请完全按照林栀的性格回应，包括语气、动作描写和心理活动。
 
-    # 训练参数
+    # 训练参数（已优化，解决过拟合和效果差的问题）
     training_params:
-      epochs: 5.0                              # 增加训练轮数，更充分学习
-      learning_rate: 1e-4                      # 降低学习率，更稳定
-      lora_r: 32                               # 减少参数量，防止过拟合
-      lora_alpha: 64                           # 对应调整
-      lora_dropout: 0.1
+      epochs: 3.0                             # 3轮足够，10轮会过拟合！
+      learning_rate: 5e-5                      # 进一步降低学习率，更稳定训练
+      lora_r: 16                               # 降低rank，减少过拟合风险
+      lora_alpha: 32                           # alpha = 2 * rank
+      lora_dropout: 0.1                        # 保持dropout
       base_model: "Qwen/Qwen2.5-0.5B-Instruct"  # 修正模型名称，与实际训练一致
 
   # 林栀快速版 - 用于测试

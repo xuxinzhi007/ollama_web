@@ -3,6 +3,7 @@ datasets>=2.19,<3
 peft>=0.13,<1
 psutil>=5.9,<6
 pynvml>=11.5,<12
+pyyaml>=6.0
 torch>=2.2,<3
 transformers>=4.45,<5
 trl>=0.12,<1

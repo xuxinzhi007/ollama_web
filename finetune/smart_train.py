@@ -22,6 +22,30 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import subprocess
 import time
+import shutil
+import zipfile
+import urllib.request
+import urllib.error
+
+# Windows编码处理：设置UTF-8输出以支持emoji和中文
+if sys.platform == 'win32':
+    try:
+        # 设置环境变量（如果未设置）
+        if 'PYTHONIOENCODING' not in os.environ:
+            os.environ['PYTHONIOENCODING'] = 'utf-8'
+        if 'PYTHONUTF8' not in os.environ:
+            os.environ['PYTHONUTF8'] = '1'
+        
+        # 尝试设置控制台编码为UTF-8
+        import io
+        # 重新打开stdout和stderr以应用UTF-8编码
+        if hasattr(sys.stdout, 'buffer'):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        if hasattr(sys.stderr, 'buffer'):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    except Exception:
+        # 如果设置失败，使用replace模式避免崩溃
+        pass
 
 class SmartTrainer:
     def __init__(self):
@@ -29,6 +53,167 @@ class SmartTrainer:
         self.datasets_dir = self.root_dir / "datasets"
         self.config_file = self.root_dir / "character_configs.yaml"
         self.config = None  # 延迟加载配置
+
+        # 工具目录（放下载的 llama.cpp，不需要编译，只用转换脚本）
+        self.tools_dir = self.root_dir / ".tools"
+        self.llama_cpp_dir = self.tools_dir / "llama.cpp"
+
+    def _ensure_llama_cpp_converter(self) -> Optional[Path]:
+        """
+        确保 llama.cpp 的 convert_hf_to_gguf.py 可用。
+        优先：
+        - 已存在的 .tools/llama.cpp
+        - git clone（如果有 git）
+        - 下载 zip 解压（没有 git 也能用）
+        返回转换脚本路径或 None。
+        """
+        convert_py = self.llama_cpp_dir / "convert_hf_to_gguf.py"
+        gguf_py_dir = self.llama_cpp_dir / "gguf-py"
+        if convert_py.exists() and gguf_py_dir.exists():
+            return convert_py
+
+        self.tools_dir.mkdir(parents=True, exist_ok=True)
+
+        # 如果目录存在但不完整，先清理，避免半拉子状态
+        if self.llama_cpp_dir.exists() and not (convert_py.exists() and gguf_py_dir.exists()):
+            try:
+                shutil.rmtree(self.llama_cpp_dir)
+            except Exception:
+                pass
+
+        print("\n📦 未找到 GGUF 转换工具，准备自动获取 llama.cpp（无需编译，仅下载源码）...")
+
+        git = shutil.which("git")
+        if git:
+            try:
+                cmd = [git, "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(self.llama_cpp_dir)]
+                print(f"执行: {' '.join(cmd)}")
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    print(f"⚠️ git clone 失败，将尝试 zip 下载。错误: {r.stderr.strip()}")
+                else:
+                    if convert_py.exists() and gguf_py_dir.exists():
+                        print("✅ llama.cpp 已下载完成")
+                        return convert_py
+            except Exception as e:
+                print(f"⚠️ git clone 异常，将尝试 zip 下载: {e}")
+
+        # zip 下载兜底
+        try:
+            zip_url = "https://github.com/ggerganov/llama.cpp/archive/refs/heads/master.zip"
+            zip_path = self.tools_dir / "llama.cpp-master.zip"
+            print(f"下载: {zip_url}")
+            urllib.request.urlretrieve(zip_url, zip_path)
+
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(self.tools_dir)
+
+            extracted = self.tools_dir / "llama.cpp-master"
+            if extracted.exists():
+                extracted.rename(self.llama_cpp_dir)
+            try:
+                zip_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+            if convert_py.exists() and gguf_py_dir.exists():
+                print("✅ llama.cpp 已下载完成（zip）")
+                return convert_py
+
+            print("❌ llama.cpp 下载后未找到转换脚本/gguf-py，可能网络被拦截或下载不完整。")
+            return None
+        except urllib.error.URLError as e:
+            print(f"❌ 下载 llama.cpp 失败（网络错误）: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ 下载/解压 llama.cpp 失败: {e}")
+            return None
+
+    def _convert_merged_to_gguf(self, merged_dir: Path, gguf_out: Path, outtype: str = "f16") -> bool:
+        """
+        使用 llama.cpp 的 convert_hf_to_gguf.py 把 HuggingFace merged 目录转换为 GGUF。
+        注意：不做量化（量化需要编译出来的 quantize 可执行文件），这里只生成 f16 以保证“能跑”。
+        """
+        convert_py = self._ensure_llama_cpp_converter()
+        if not convert_py:
+            return False
+
+        gguf_py_dir = self.llama_cpp_dir / "gguf-py"
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        # 让 convert_hf_to_gguf.py 能 import gguf
+        env["PYTHONPATH"] = str(gguf_py_dir) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+        # 许多模型（包含 Qwen 系列的部分变体）在写入词表时会用到 sentencepiece
+        # Windows 上通常有预编译 wheel，直接 pip 安装即可（无需编译）。
+        try:
+            import sentencepiece  # noqa: F401
+        except Exception:
+            print("\n📦 检测到缺少依赖: sentencepiece（GGUF 转换需要）")
+            print("   将自动安装（不需要编译）。")
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-U", "sentencepiece"],
+                    capture_output=True,
+                    text=True,
+                )
+                if r.returncode != 0:
+                    print("❌ 安装 sentencepiece 失败：")
+                    if r.stdout.strip():
+                        print(r.stdout.strip())
+                    if r.stderr.strip():
+                        print(r.stderr.strip())
+                    return False
+            except Exception as e:
+                print(f"❌ 安装 sentencepiece 异常: {e}")
+                return False
+
+        def _run_convert_once() -> tuple[bool, str]:
+            cmd = [
+                sys.executable,
+                str(convert_py),
+                str(merged_dir),
+                "--outtype",
+                outtype,
+                "--outfile",
+                str(gguf_out),
+            ]
+
+            print("\n🔄 正在转换 GGUF（首次会比较慢）...")
+            print(f"输出: {gguf_out}")
+            print(f"执行: {' '.join(cmd)}")
+
+            combined = []
+            try:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+                # 实时打印（避免卡住没反馈）
+                assert p.stdout is not None
+                for line in p.stdout:
+                    line = line.rstrip()
+                    if line:
+                        print(line)
+                        # 保存少量尾部输出用于错误诊断（避免占用太多内存）
+                        combined.append(line)
+                        if len(combined) > 300:
+                            combined = combined[-300:]
+                p.wait()
+                if p.returncode != 0:
+                    return False, "\n".join(combined[-80:])
+                return True, "\n".join(combined[-80:])
+            except Exception as e:
+                return False, f"{e}"
+
+        ok, tail = _run_convert_once()
+        if not ok:
+            print(f"❌ GGUF 转换失败。末尾日志：\n{tail}")
+            return False
+
+        if gguf_out.exists() and gguf_out.stat().st_size > 0:
+            print("✅ GGUF 转换完成")
+            return True
+        print("❌ GGUF 文件未生成或为空")
+        return False
 
     def _ensure_config_loaded(self):
         """确保配置已加载"""
@@ -654,15 +839,96 @@ class SmartTrainer:
             return
 
         resume_from_checkpoint = None
+        remaining_epochs = None
         if choice == "resume":
             # 断点续训模式
             lora_dir = Path(f"out/lora_{character}")
             checkpoint_files = list(lora_dir.glob('checkpoint-*'))
             if checkpoint_files:
-                # 找到最新的checkpoint
-                latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
-                resume_from_checkpoint = str(latest_checkpoint)
-                print(f"📍 将从检查点继续训练: {latest_checkpoint.name}")
+                # 找到最新的checkpoint（优先按epoch，其次按修改时间）
+                latest_checkpoint = None
+                latest_epoch = -1
+                checkpoint_info = []
+                
+                # 收集所有checkpoint的信息
+                for cp_dir in checkpoint_files:
+                    trainer_state_file = cp_dir / "trainer_state.json"
+                    if trainer_state_file.exists():
+                        try:
+                            import json
+                            with open(trainer_state_file, 'r', encoding='utf-8') as f:
+                                trainer_state = json.load(f)
+                                epoch = trainer_state.get('epoch', 0)
+                                checkpoint_info.append({
+                                    'dir': cp_dir,
+                                    'epoch': epoch,
+                                    'step': trainer_state.get('global_step', 0),
+                                    'mtime': cp_dir.stat().st_mtime
+                                })
+                        except Exception:
+                            # 如果无法读取，记录但标记epoch为-1
+                            checkpoint_info.append({
+                                'dir': cp_dir,
+                                'epoch': -1,
+                                'step': 0,
+                                'mtime': cp_dir.stat().st_mtime
+                            })
+                
+                if checkpoint_info:
+                    # 优先选择epoch最大的checkpoint
+                    valid_checkpoints = [cp for cp in checkpoint_info if cp['epoch'] >= 0]
+                    if valid_checkpoints:
+                        latest_checkpoint_info = max(valid_checkpoints, key=lambda x: (x['epoch'], x['mtime']))
+                        latest_checkpoint = latest_checkpoint_info['dir']
+                        latest_epoch = latest_checkpoint_info['epoch']
+                    else:
+                        # 如果所有checkpoint都无法读取epoch，使用修改时间
+                        latest_checkpoint_info = max(checkpoint_info, key=lambda x: x['mtime'])
+                        latest_checkpoint = latest_checkpoint_info['dir']
+                
+                # 如果还是没有找到，使用修改时间
+                if latest_checkpoint is None:
+                    latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
+                
+                # 使用绝对路径，确保跨平台兼容
+                resume_from_checkpoint = str(latest_checkpoint.resolve())
+                
+                # 读取checkpoint的训练状态
+                try:
+                    import json
+                    trainer_state_file = Path(latest_checkpoint) / "trainer_state.json"
+                    if trainer_state_file.exists():
+                        with open(trainer_state_file, 'r', encoding='utf-8') as f:
+                            trainer_state = json.load(f)
+                            current_epoch = trainer_state.get('epoch', 0)
+                            global_step = trainer_state.get('global_step', 0)
+                            log_history = trainer_state.get('log_history', [])
+                            last_loss = log_history[-1].get('loss', 'N/A') if log_history else 'N/A'
+                            
+                            total_epochs = training_params.get('epochs', 3.0)
+                            remaining_epochs = max(0.1, total_epochs - current_epoch)
+                            
+                            print(f"📍 将从检查点继续训练: {latest_checkpoint.name}")
+                            print(f"   当前epoch: {current_epoch:.2f}")
+                            print(f"   训练步数: {global_step}")
+                            print(f"   最新loss: {last_loss}")
+                            print(f"   剩余epochs: {remaining_epochs:.2f}")
+                            
+                            if current_epoch >= total_epochs - 0.1:
+                                print(f"⚠️  警告：训练已接近完成（{current_epoch:.2f}/{total_epochs} epochs）")
+                                print(f"   建议：如果需要更多训练，请增加总epochs数")
+                            
+                            # 显示所有可用checkpoint供参考
+                            if len(checkpoint_info) > 1:
+                                print(f"\n📋 所有可用checkpoint:")
+                                sorted_checkpoints = sorted([cp for cp in checkpoint_info if cp['epoch'] >= 0], 
+                                                          key=lambda x: x['epoch'], reverse=True)
+                                for cp in sorted_checkpoints[:5]:  # 只显示前5个
+                                    marker = " ← 将使用" if cp['dir'] == latest_checkpoint else ""
+                                    print(f"   {cp['dir'].name}: epoch={cp['epoch']:.2f}, step={cp['step']}{marker}")
+                except Exception as e:
+                    print(f"⚠️  无法读取checkpoint状态: {e}")
+                    print(f"📍 将从检查点继续训练: {latest_checkpoint.name}")
 
         # 构建训练命令
         cmd = [
@@ -671,12 +937,24 @@ class SmartTrainer:
             "--output_dir", f"out/lora_{character}"
         ]
 
+        # 选择基础模型：来自 character_configs.yaml 的 training_params.base_model
+        # （注意：train_lora.py 的默认值是 Qwen/Qwen2.5-0.5B-Instruct，但如果你在 YAML 里配置了 base_model，
+        # 这里必须显式传入，否则你修改配置不会生效）
+        base_model = training_params.get("base_model")
+        if base_model:
+            cmd.extend(["--model_name_or_path", str(base_model)])
+            print(f"🤖 Base model: {base_model}")
+
         # 添加验证数据
         if val_path:
             cmd.extend(["--val_jsonl", val_path])
 
         # 添加训练参数
-        if 'epochs' in training_params:
+        # 重要：如果继续训练，使用剩余epochs数，而不是总epochs数
+        if resume_from_checkpoint and remaining_epochs:
+            cmd.extend(["--num_train_epochs", str(remaining_epochs)])
+            print(f"📊 继续训练剩余 {remaining_epochs:.2f} epochs")
+        elif 'epochs' in training_params:
             cmd.extend(["--num_train_epochs", str(training_params['epochs'])])
         if 'learning_rate' in training_params:
             cmd.extend(["--learning_rate", str(training_params['learning_rate'])])
@@ -813,45 +1091,126 @@ class SmartTrainer:
             print("   请确保训练时使用了 --merge_and_save 参数")
             return False
 
-        # 验证模型文件是否完整
-        model_files = ["model.safetensors", "pytorch_model.bin"]  # 支持新旧格式
-        has_model = any((merged_dir / f).exists() for f in model_files)
+        # 重要说明：
+        # Ollama 的 Modelfile `FROM` 需要是 Ollama 模型名或本地 GGUF 文件路径。
+        # HuggingFace 合并目录（config.json + safetensors）不能可靠地直接作为 `FROM <dir>` 使用。
+        # 这会导致“看似导入成功，但实际运行的不是训练后的权重”，出现你看到的“刷题/不搭边”输出。
+        gguf_files = sorted(merged_dir.glob("*.gguf"))
+        if not gguf_files:
+            print(f"⚠️  未找到 GGUF 文件（{merged_dir}/*.gguf），将尝试自动转换...")
 
-        required_files = ["config.json", "tokenizer.json"]
-        missing_files = []
-        for file_name in required_files:
-            if not (merged_dir / file_name).exists():
-                missing_files.append(file_name)
+            gguf_out = (merged_dir / f"{character}.gguf").resolve()
+            # 如果已有同名但为空/损坏，先删
+            if gguf_out.exists() and gguf_out.stat().st_size == 0:
+                try:
+                    gguf_out.unlink()
+                except Exception:
+                    pass
 
-        if not has_model:
-            missing_files.append("model.safetensors 或 pytorch_model.bin")
+            ok = self._convert_merged_to_gguf(merged_dir=merged_dir, gguf_out=gguf_out, outtype="f16")
+            if not ok:
+                print("\n❌ 自动转换失败。你也可以手动转换：")
+                print(f"   python /path/to/llama.cpp/convert_hf_to_gguf.py \"{merged_dir}\" --outtype f16 --outfile \"{gguf_out}\"")
+                return False
 
-        if missing_files:
-            print(f"⚠️  模型文件不完整，缺少: {', '.join(missing_files)}")
-            print("   模型可能仍可使用，但建议重新训练")
+            gguf_files = sorted(merged_dir.glob("*.gguf"))
+            if not gguf_files:
+                print("❌ 自动转换完成但未发现 .gguf 文件")
+                return False
 
-        print(f"📁 模型路径: {merged_dir}")
-        print(f"📦 模型大小: {sum(f.stat().st_size for f in merged_dir.glob('*')) / (1024**3):.1f} GB")
+        gguf_path = gguf_files[-1].resolve()
+        print(f"📦 将使用 GGUF: {gguf_path}")
 
         # 创建Ollama Modelfile (使用完整角色配置和优化推理参数)
         self._ensure_config_loaded()
         char_config = self.config.get('characters', {}).get(character, {})
 
-        # 使用训练时的完整system_prompt，确保与训练数据一致
-        system_prompt = char_config.get('system_prompt', f'你是{character}，请保持角色特征进行对话。').strip()
+        # 简化system_prompt，避免格式化的列表（防止模型输出格式标记）
+        raw_system_prompt = char_config.get('system_prompt', f'你是{character}，请保持角色特征进行对话。').strip()
+        
+        # 简化system prompt：移除格式化的列表，只保留核心角色设定
+        # 避免模型学会输出"你的特点："、"外表："等格式标记
+        system_prompt = raw_system_prompt
+        if "你的特点：" in system_prompt or "- 外表：" in system_prompt:
+            # 提取核心角色设定，移除格式化内容
+            lines = system_prompt.split('\n')
+            simplified_lines = []
+            skip_format = False
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                # 跳过格式化的列表
+                if line.startswith('- ') or line.startswith('你的特点：') or line.startswith('外表：') or line.startswith('性格：') or line.startswith('互动：'):
+                    skip_format = True
+                    continue
+                if skip_format and not line.startswith('请'):
+                    continue
+                skip_format = False
+                # 保留核心设定
+                if '你是' in line or '请' in line:
+                    simplified_lines.append(line)
+            
+            if simplified_lines:
+                # 构建简化的system prompt
+                system_prompt = ' '.join(simplified_lines)
+                # 进一步简化：移除多余的格式
+                system_prompt = system_prompt.replace('你的特点：', '').replace('外表：', '').replace('性格：', '').replace('互动：', '')
+                system_prompt = ' '.join(system_prompt.split())  # 清理多余空格
+            else:
+                # 如果简化失败，使用最基本的设定
+                system_prompt = f"你是{char_config.get('name', character)}，请按照角色性格进行对话。"
 
+        # 强约束：防止输出“题目/答案/解析/选择题”等跑偏内容，以及避免输出角色标签
+        # 这些内容通常是底座模型的“通用应试/解题”倾向，角色扮演场景下需要明确禁止。
+        system_prompt = (
+            f"{system_prompt}\n\n"
+            "输出规则：\n"
+            "1) 你必须用第一人称，以角色口吻与用户对话。\n"
+            "2) 禁止输出：题目、答案、解析、判断题、选择题、A/B/C/D 选项、填空题、材料分析等应试内容。\n"
+            "3) 禁止输出：system/user/assistant 等角色标签或提示词格式。\n"
+            "4) 回复自然简短，避免重复同一句话。\n"
+            "5) 遇到客观问题（如数学、时间、常识）：必须先给出准确答案；不要胡编。\n"
+            "   例如：用户问“1+1等于几”，你要回答“2”，然后再用林栀口吻补一句也可以。\n"
+        )
+        
         # 获取角色的中文名称用于显示
         char_name = char_config.get('name', character)
 
         print(f"📝 角色配置: {char_name}")
-        print(f"📄 System Prompt: {system_prompt[:100]}..." if len(system_prompt) > 100 else f"📄 System Prompt: {system_prompt}")
+        print(f"📄 System Prompt (原始): {raw_system_prompt[:100]}..." if len(raw_system_prompt) > 100 else f"📄 System Prompt (原始): {raw_system_prompt}")
+        print(f"📄 System Prompt (简化): {system_prompt[:100]}..." if len(system_prompt) > 100 else f"📄 System Prompt (简化): {system_prompt}")
 
         # 优化推理参数，更适合角色扮演
-        modelfile_content = f"""FROM {merged_dir}
-PARAMETER temperature 0.7
-PARAMETER top_p 0.8
+        # 关键：显式指定 Qwen 的对话模板，避免 Ollama 使用不匹配的默认模板导致输出“system/参考答案/刷题风”。
+        # 这里用 Qwen2 的 <|im_start|>/<|im_end|> 格式，兼容多轮对话。
+        template = r"""{{- if .System -}}<|im_start|>system
+{{ .System }}<|im_end|>
+{{- else -}}<|im_start|>system
+You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
+{{- end -}}
+{{- range .Messages }}
+{{- if eq .Role "system" }}<|im_start|>system
+{{ .Content }}<|im_end|>
+{{- else if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{- else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}<|im_end|>
+{{- end }}
+{{- end }}
+<|im_start|>assistant
+"""
+
+        modelfile_content = f"""FROM {gguf_path}
+# 更稳的角色扮演推理参数（减少跑偏与长篇刷题）
+PARAMETER temperature 0.5
+PARAMETER top_p 0.9
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.1
+PARAMETER repeat_penalty 1.15
+PARAMETER num_predict 256
+PARAMETER stop "<|im_end|>"
+
+TEMPLATE \"\"\"{template}\"\"\"
 SYSTEM \"\"\"{system_prompt}\"\"\"
 """
 
@@ -1508,10 +1867,12 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
         self.show_existing_training_info(character, existing_info)
 
         print(f"\n🤔 检测到已有训练结果，请选择处理方式:")
-        print("1) 🔄 重新训练 (覆盖现有结果)")
-        print("2) 📦 备份后重新训练 (保留现有结果)")
-        print("3) ➕ 继续训练 (断点续训，增加更多epochs)")
+        print("1) 🔄 重新训练 (覆盖现有结果) - ⚠️  Loss会从初始值重新开始")
+        print("2) 📦 备份后重新训练 (保留现有结果) - ⚠️  Loss会从初始值重新开始")
+        print("3) ➕ 继续训练 (断点续训，增加更多epochs) - ✅ 推荐！Loss会从之前的值继续")
         print("4) 🚫 取消训练")
+        print()
+        print("💡 提示：如果loss已经降到0.5以下，建议选择'继续训练'，让loss继续下降")
         print()
 
         while True:

@@ -239,6 +239,19 @@ def main() -> None:
         resume_from_checkpoint=args.resume_from_checkpoint,
     )
 
+    # 如果要从checkpoint恢复，需要先加载LoRA权重
+    if args.resume_from_checkpoint:
+        print(f"🔄 准备从checkpoint恢复: {args.resume_from_checkpoint}")
+        checkpoint_path = Path(args.resume_from_checkpoint)
+        if checkpoint_path.exists():
+            # 检查checkpoint是否包含LoRA权重
+            adapter_files = list(checkpoint_path.glob("adapter_model.*"))
+            if adapter_files:
+                print(f"✅ 找到LoRA权重文件: {adapter_files[0].name}")
+            else:
+                print(f"⚠️  警告：checkpoint中未找到LoRA权重文件")
+                print(f"   可能无法正确恢复训练状态")
+    
     trainer = SFTTrainer(
         model=model,
         args=sft_args,
@@ -253,6 +266,11 @@ def main() -> None:
     except Exception:
         pass
 
+    # 训练（会自动处理resume_from_checkpoint）
+    if args.resume_from_checkpoint:
+        print(f"🔄 开始从checkpoint恢复训练...")
+        print(f"   如果loss从初始值开始，说明checkpoint可能没有正确加载")
+    
     trainer.train()
 
     # 保存 LoRA adapter

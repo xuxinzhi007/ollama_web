@@ -11,7 +11,7 @@ def fix_training_data():
     """修复训练数据格式问题"""
 
     input_file = Path("data/train.jsonl")
-    output_file = Path("data/train_fixed.jsonl")
+    output_file = Path("data/train.jsonl")
 
     if not input_file.exists():
         print(f"❌ 找不到文件: {input_file}")
@@ -152,7 +152,7 @@ if __name__ == "__main__":
         create_validation_data()
         print("\n🎉 数据修复完成！现在可以开始训练了")
         print("\n💡 使用修复后的数据:")
-        print("   cp data/train_fixed.jsonl data/train.jsonl")
+        print("   cp data/train.jsonl data/train.jsonl")
         print("   python train_to_ollama.py --ollama_name 'linzhi-pure'")
     else:
         print("❌ 数据修复失败")
