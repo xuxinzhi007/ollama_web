@@ -103,8 +103,13 @@ def check_dataset():
                 val_files = list(char_dir.glob("*val*.jsonl"))
 
                 if train_files:
-                    # 选择最大的训练文件
-                    train_file = max(train_files, key=lambda f: f.stat().st_size)
+                    # 优先选择 train.jsonl，避免选择备份文件
+                    primary_train = char_dir / "train.jsonl"
+                    if primary_train in train_files:
+                        train_file = primary_train
+                    else:
+                        # 回退到选择最大文件
+                        train_file = max(train_files, key=lambda f: f.stat().st_size)
                     print(f"🎯 找到训练数据: {train_file}")
 
                     if val_files:
@@ -245,10 +250,27 @@ def show_training_info(model_name: str, epochs: float, ollama_name: str, data_in
     print("   5️⃣ 导入Ollama ⏳")
 
 
-def train_lora(model_name: str, epochs: float, output_dir: str, merged_dir: str, train_file: Path, val_file: Path = None):
+def train_lora(model_name: str, epochs: float, output_dir: str, merged_dir: str, train_file: Path, val_file: Path = None, config: ConfigManager = None):
     """训练 LoRA"""
     print(f"\n🚀 开始 LoRA 微调训练...")
     print(f"⏰ 开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # 从配置中获取 LoRA 参数 (修复参数缺失问题)
+    if config:
+        learning_rate = config.get('training.learning_rate', 2e-4)
+        lora_r = config.get('lora.rank', 8)
+        lora_alpha = config.get('lora.alpha', 16)
+        lora_dropout = config.get('lora.dropout', 0.05)
+        seed = config.get('training.seed', 42)  # 添加种子以确保可重现性
+        print(f"📋 使用配置参数: lr={learning_rate}, rank={lora_r}, alpha={lora_alpha}, dropout={lora_dropout}, seed={seed}")
+    else:
+        # 回退到默认值
+        learning_rate = 2e-4
+        lora_r = 8
+        lora_alpha = 16
+        lora_dropout = 0.05
+        seed = 42
+        print(f"⚠️  使用默认参数: lr={learning_rate}, rank={lora_r}, alpha={lora_alpha}, dropout={lora_dropout}, seed={seed}")
 
     cmd = f"""python train_lora.py \\
         --model_name_or_path "{model_name}" \\
@@ -256,6 +278,11 @@ def train_lora(model_name: str, epochs: float, output_dir: str, merged_dir: str,
         --output_dir "{output_dir}" \\
         --merged_dir "{merged_dir}" \\
         --num_train_epochs {epochs} \\
+        --learning_rate {learning_rate} \\
+        --lora_r {lora_r} \\
+        --lora_alpha {lora_alpha} \\
+        --lora_dropout {lora_dropout} \\
+        --seed {seed} \\
         --merge_and_save"""
 
     if val_file and val_file.exists():
@@ -444,6 +471,8 @@ def main():
     # 配置文件参数
     parser.add_argument("--config", type=str, default="config.yaml",
                        help="配置文件路径")
+    parser.add_argument("--character", type=str, default=None,
+                       help="角色名称 (从 character_configs.yaml 读取，优先级高于 config.yaml)")
 
     # 训练参数 (会覆盖配置文件)
     parser.add_argument("--model", type=str, default=None,
@@ -469,8 +498,8 @@ def main():
 
     args = parser.parse_args()
 
-    # 加载配置
-    config = ConfigManager(args.config)
+    # 加载配置 (支持角色配置)
+    config = ConfigManager(args.config, character=args.character)
     config.show_config()
 
     # 使用命令行参数覆盖配置文件
@@ -507,19 +536,23 @@ def main():
         if not train_file:
             sys.exit(1)
 
-    # 检查模型是否已存在
-    model_exists = False
-    ret, _ = run_command(f"ollama list | grep {args.ollama_name}", check=False)
-    if ret == 0:
-        model_exists = True
+    # 检查本地训练文件是否已存在 (正确的逻辑)
+    lora_dir_exists = Path(args.lora_dir).exists()
+    merged_dir_exists = Path(args.merged_dir).exists()
+    local_model_exists = lora_dir_exists or merged_dir_exists
 
-        if not args.force and not args.continue_train and not args.skip_train:
-            print(f"⚠️  模型 '{args.ollama_name}' 已存在")
-            print("\n📋 继续训练选项:")
-            print("1) 🔄 继续训练 (增加轮次/调整参数)")
-            print("2) 🗑️  强制覆盖 (删除重训)")
-            print("3) ⏭️  跳过训练 (直接使用现有模型)")
-            print("4) ❌ 取消操作")
+    if local_model_exists and not args.force and not args.continue_train and not args.skip_train:
+        print(f"⚠️  本地训练文件已存在:")
+        if lora_dir_exists:
+            print(f"   📂 LoRA训练目录: {args.lora_dir}")
+        if merged_dir_exists:
+            print(f"   📂 合并模型目录: {args.merged_dir}")
+
+        print("\n📋 继续训练选项:")
+        print("1) 🔄 继续训练 (在现有基础上训练)")
+        print("2) 🗑️  重新训练 (删除旧文件重新开始)")
+        print("3) ⏭️  跳过训练 (使用现有模型直接导入)")
+        print("4) ❌ 取消操作")
 
             while True:
                 choice = input("\n请选择 (1-4): ").strip()
@@ -539,7 +572,7 @@ def main():
                     print("❌ 无效选择，请输入1-4")
 
     # 处理继续训练逻辑
-    if args.continue_train and model_exists:
+    if args.continue_train and local_model_exists:
         print(f"\n🔄 继续训练模型: {args.ollama_name}")
         print("📋 继续训练方式:")
         print("1) 📈 增量训练 (在当前基础上增加训练轮次)")
@@ -598,20 +631,21 @@ def main():
         args.force = True
 
     try:
-        # 准备数据集信息用于显示
+        # 准备数据集信息用于显示（使用 check_dataset() 找到的文件）
         data_info = {}
         if not args.skip_train:
-            # 获取数据集统计信息
-            train_file = Path("data/train.jsonl")
-            val_file = Path("data/val.jsonl")
-
-            if train_file.exists():
+            # 使用已经找到的正确文件路径，而不是硬编码路径
+            if train_file and train_file.exists():
                 with open(train_file, 'r', encoding='utf-8') as f:
                     data_info['train_count'] = sum(1 for _ in f)
+            else:
+                data_info['train_count'] = 0
 
-            if val_file.exists():
+            if val_file and val_file.exists():
                 with open(val_file, 'r', encoding='utf-8') as f:
                     data_info['val_count'] = sum(1 for _ in f)
+            else:
+                data_info['val_count'] = 0
 
         # 显示训练概览
         if not args.skip_train:
@@ -625,7 +659,8 @@ def main():
                 output_dir=args.lora_dir,
                 merged_dir=args.merged_dir,
                 train_file=train_file,
-                val_file=val_file
+                val_file=val_file,
+                config=config  # 传递配置对象，确保使用正确的 LoRA 参数
             )
             if not success:
                 sys.exit(1)

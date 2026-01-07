@@ -761,6 +761,307 @@ class SmartTrainer:
                 print(f"   解决方案: 访问 https://ollama.com/ 安装")
                 print(f"   注意: Ollama不是训练必需的，只在导入模型时需要")
 
+    def _analyze_training_performance(self, log_history: list, current_epoch: float) -> dict:
+        """智能分析训练效果并给出建议"""
+        if not log_history:
+            return {"status": "no_data", "message": "无法获取训练历史数据"}
+
+        # 提取关键指标
+        latest_log = log_history[-1] if log_history else {}
+
+        # 获取loss和accuracy
+        train_loss = latest_log.get('train_loss', latest_log.get('loss', None))
+        token_accuracy = latest_log.get('mean_token_accuracy', 0)
+
+        # 改进的loss趋势分析
+        loss_trend = "unknown"
+        loss_improvement = 0
+
+        if len(log_history) >= 2:
+            # 收集所有有效的loss值
+            all_losses = []
+            for entry in log_history:
+                loss = entry.get('train_loss', entry.get('loss'))
+                if loss is not None:
+                    all_losses.append(loss)
+
+            if len(all_losses) >= 2:
+                # 计算整体趋势
+                first_loss = all_losses[0] if len(all_losses) > 2 else all_losses[0]
+                last_loss = all_losses[-1]
+                loss_improvement = first_loss - last_loss
+
+                # 分析最近的趋势（最近3-5个记录点）
+                recent_count = min(5, len(all_losses))
+                recent_losses = all_losses[-recent_count:]
+
+                if len(recent_losses) >= 2:
+                    # 计算最近的平均斜率
+                    improving_count = 0
+                    worsening_count = 0
+
+                    for i in range(1, len(recent_losses)):
+                        if recent_losses[i] < recent_losses[i-1]:
+                            improving_count += 1
+                        elif recent_losses[i] > recent_losses[i-1]:
+                            worsening_count += 1
+
+                    # 基于趋势计数判断总体趋势
+                    if improving_count > worsening_count:
+                        loss_trend = "improving"
+                    elif worsening_count > improving_count:
+                        loss_trend = "worsening"
+                    else:
+                        loss_trend = "stable"
+
+        # 效果评级
+        performance_level = "unknown"
+        recommendation = ""
+        emoji = ""
+
+        if train_loss is not None:
+            if train_loss < 0.5:
+                performance_level = "excellent"
+                emoji = "🎉"
+                recommendation = "模型表现优秀！可以停止训练或微调1-2个epochs"
+            elif train_loss < 1.0:
+                performance_level = "good"
+                emoji = "✅"
+                recommendation = "模型表现良好，可以停止训练或继续1-3个epochs进一步优化"
+            elif train_loss < 2.0:
+                performance_level = "fair"
+                emoji = "🔄"
+                recommendation = "模型还在学习中，建议继续训练2-4个epochs"
+            elif train_loss < 3.0:
+                performance_level = "poor"
+                emoji = "⚠️"
+                recommendation = "模型学习效果一般，强烈建议继续训练3-6个epochs"
+            else:
+                performance_level = "very_poor"
+                emoji = "❌"
+                recommendation = "模型学习效果不佳，检查数据质量或调整学习率后继续训练"
+
+        # Token准确率评估
+        accuracy_status = ""
+        if token_accuracy > 0:
+            if token_accuracy > 0.7:
+                accuracy_status = "准确率优秀(>70%)"
+            elif token_accuracy > 0.6:
+                accuracy_status = "准确率良好(60-70%)"
+            elif token_accuracy > 0.5:
+                accuracy_status = "准确率一般(50-60%)"
+            else:
+                accuracy_status = "准确率较低(<50%)"
+
+        return {
+            "status": "analyzed",
+            "train_loss": train_loss,
+            "token_accuracy": token_accuracy,
+            "accuracy_status": accuracy_status,
+            "loss_trend": loss_trend,
+            "loss_improvement": loss_improvement,
+            "performance_level": performance_level,
+            "emoji": emoji,
+            "recommendation": recommendation,
+            "current_epoch": current_epoch
+        }
+
+    def _show_training_analysis(self, analysis: dict):
+        """显示训练分析结果"""
+        if analysis["status"] != "analyzed":
+            return
+
+        # 🎯 核心指标面板 - 突出显示最重要的数据
+        print(f"\n" + "🎯" + " 训练核心指标 ".center(48, "="))
+
+        # 创建紧凑的状态面板
+        train_loss = analysis.get("train_loss")
+        token_accuracy = analysis.get("token_accuracy", 0)
+        loss_improvement = analysis.get("loss_improvement", 0)
+        performance_level = analysis.get("performance_level", "unknown")
+        emoji = analysis.get("emoji", "📊")
+
+        # 核心指标一览表格
+        if train_loss is not None:
+            # 确定Loss状态颜色
+            if train_loss < 0.5:
+                loss_status = "🟢 优秀"
+            elif train_loss < 1.0:
+                loss_status = "🟡 良好"
+            elif train_loss < 2.0:
+                loss_status = "🟠 一般"
+            else:
+                loss_status = "🔴 较差"
+
+            print(f"📈 当前Loss: {train_loss:.4f} ({loss_status})")
+
+        if token_accuracy > 0:
+            # 确定准确率状态
+            if token_accuracy > 0.7:
+                acc_status = "🟢 优秀"
+            elif token_accuracy > 0.6:
+                acc_status = "🟡 良好"
+            elif token_accuracy > 0.5:
+                acc_status = "🟠 一般"
+            else:
+                acc_status = "🔴 较差"
+
+            print(f"🎯 准确率: {token_accuracy:.1%} ({acc_status})")
+
+        # 改进情况 - 用更直观的表示
+        if loss_improvement > 0:
+            improvement_display = f"📉 已改进: -{loss_improvement:.4f}"
+            if loss_improvement > 2.0:
+                improvement_display += " (显著提升 🎉)"
+            elif loss_improvement > 1.0:
+                improvement_display += " (良好提升 ✅)"
+            else:
+                improvement_display += " (稳步提升)"
+        elif loss_improvement < 0:
+            improvement_display = f"📈 Loss上升: +{abs(loss_improvement):.4f} ⚠️"
+        else:
+            improvement_display = "➡️ Loss无明显变化"
+
+        print(f"{improvement_display}")
+
+        # 趋势指示器
+        loss_trend = analysis.get("loss_trend", "unknown")
+        if loss_trend == "improving":
+            trend_display = "📉 趋势: 持续下降 ✅"
+        elif loss_trend == "worsening":
+            trend_display = "📈 趋势: 最近上升 ⚠️"
+        elif loss_trend == "stable":
+            trend_display = "➡️ 趋势: 趋于稳定"
+        else:
+            trend_display = "❓ 趋势: 数据不足"
+
+        print(f"{trend_display}")
+
+        # 🎯 快速决策面板
+        print(f"\n" + "💡" + " 快速决策 ".center(48, "="))
+        print(f"{emoji} 训练效果: {performance_level}")
+        print(f"📋 建议: {analysis.get('recommendation', '继续观察')}")
+
+        # 🎯 参考指南（简化版）
+        print(f"\n" + "📏" + " 指标参考 ".center(48, "="))
+        print(f"Loss: <0.5优秀 <1.0良好 <2.0一般 | 准确率: >70%优秀 >60%良好")
+
+    def show_training_status_quick(self, analysis: dict):
+        """超级简洁的训练状态一览（用户最想要的信息）"""
+        if analysis.get("status") != "analyzed":
+            return
+
+        train_loss = analysis.get("train_loss")
+        token_accuracy = analysis.get("token_accuracy", 0)
+        loss_improvement = analysis.get("loss_improvement", 0)
+        performance_level = analysis.get("performance_level", "unknown")
+
+        # 🎯 一行显示最关键信息
+        print(f"\n" + "⚡" + " 训练状态速览 ".center(48, "="))
+
+        # 状态指示器
+        if train_loss is not None:
+            if train_loss < 0.5:
+                status_emoji = "🎉"
+                status_text = "优秀"
+            elif train_loss < 1.0:
+                status_emoji = "✅"
+                status_text = "良好"
+            elif train_loss < 2.0:
+                status_emoji = "📈"
+                status_text = "学习中"
+            else:
+                status_emoji = "⚠️"
+                status_text = "需改进"
+
+            print(f"{status_emoji} Loss: {train_loss:.4f} ({status_text})", end="")
+
+        if token_accuracy > 0:
+            print(f" | 🎯 准确率: {token_accuracy:.1%}", end="")
+
+        if loss_improvement > 0:
+            print(f" | 📉 已改进: {loss_improvement:.3f}")
+        else:
+            print()
+
+        # 快速决策
+        if performance_level == "excellent":
+            print("💡 可停止训练或微调1轮稳定")
+        elif performance_level == "good":
+            print("💡 效果良好，建议继续1-2轮")
+        elif performance_level in ["fair", "poor"]:
+            print("💡 还在学习，建议继续2-4轮")
+        else:
+            print("💡 建议继续训练")
+
+        print("=" * 48)
+
+    def _show_continue_training_recommendation(self, analysis: dict, current_epoch: float, original_total_epochs: float):
+        """显示继续训练的智能建议"""
+        print(f"\n" + "🚀" + " 继续训练决策 ".center(48, "="))
+
+        # 进度信息
+        print(f"📊 进度: {current_epoch:.1f}/{original_total_epochs} epochs 已完成")
+
+        if analysis["status"] != "analyzed":
+            print("💡 建议: 继续训练 1-2 epochs")
+            return
+
+        train_loss = analysis.get("train_loss")
+        token_accuracy = analysis.get("token_accuracy", 0)
+        loss_trend = analysis.get("loss_trend", "unknown")
+        loss_improvement = analysis.get("loss_improvement", 0)
+        performance_level = analysis.get("performance_level", "unknown")
+
+        # 🎯 一目了然的决策建议
+        print(f"\n" + "🎯 决策建议".center(32, "-"))
+
+        if performance_level == "excellent":
+            print("🏆 状态: 训练效果优秀")
+            if loss_improvement > 1.0:
+                print("✅ 建议: 可以停止，或再训练 0.5-1 epoch 稳定效果")
+            else:
+                print("✅ 建议: 建议停止训练，效果已达标")
+
+        elif performance_level == "good":
+            print("✅ 状态: 训练效果良好")
+            if loss_trend == "improving":
+                print("📈 建议: 继续训练 1-2 epochs，还有改进空间")
+            else:
+                print("⏸️ 建议: 可以停止，或继续 1 epoch")
+
+        elif performance_level in ["fair", "poor"]:
+            print("📈 状态: 还在学习中")
+            if loss_trend == "improving":
+                if loss_improvement > 1.0:
+                    print("🚀 建议: 强烈建议继续 3-5 epochs，进展良好")
+                else:
+                    print("📈 建议: 继续训练 2-3 epochs")
+            elif loss_trend == "stable":
+                print("⚠️ 建议: 尝试 2-3 epochs 或调整学习率")
+            else:
+                print("🛑 建议: 可能过拟合，谨慎继续或停止")
+
+        elif performance_level == "very_poor":
+            print("🔴 状态: 训练效果较差")
+            if loss_improvement > 0.5:
+                print("🔄 建议: 继续训练 4-6 epochs")
+            else:
+                print("🔧 建议: 检查数据质量或调整参数")
+
+        # 关键指标提醒
+        print(f"\n" + "📋 关键提醒".center(32, "-"))
+        if train_loss and train_loss < 0.6:
+            print("🟢 Loss已达到良好水平")
+        if token_accuracy > 0.75:
+            print("🟢 准确率表现优秀")
+        if loss_improvement > 2.0:
+            print("🎉 训练改进显著")
+        elif loss_improvement < 0:
+            print("⚠️ Loss出现上升，需要关注")
+
+        print("=" * 48)
+
     def _reset_environment(self):
         """重置环境"""
         print("\n🔄 环境重置")
@@ -812,6 +1113,54 @@ class SmartTrainer:
     def _menu_model_testing(self):
         """菜单：模型测试"""
         self._test_ollama_model()
+
+
+    def estimate_training_time(self, epochs: float, data_size: int = 300) -> str:
+        """估算训练时间"""
+        base_time_per_epoch = 2.5  # 分钟
+        time_factor = max(1.0, data_size / 300)  # 数据量调整系数
+        estimated_minutes = epochs * base_time_per_epoch * time_factor
+
+        if estimated_minutes < 60:
+            return f"约 {int(estimated_minutes)} 分钟"
+        else:
+            hours = int(estimated_minutes // 60)
+            minutes = int(estimated_minutes % 60)
+            return f"约 {hours} 小时 {minutes} 分钟"
+
+    def show_training_info(self, character: str, model_name: str, epochs: float, ollama_name: str, train_count: int, val_count: int, training_analysis: dict = None):
+        """显示训练信息概览"""
+        print(f"\n" + "🎯" + f" {character} 训练任务 ".center(48, "="))
+
+        # 🎯 核心配置一览
+        print(f"🤖 模型: {model_name.split('/')[-1]}")  # 只显示模型名，不显示完整路径
+        print(f"🔄 轮数: {epochs} epochs | 📊 数据: {train_count}训练 + {val_count}验证")
+        print(f"⏰ 预计: {self.estimate_training_time(epochs, train_count)} | 📦 输出: {ollama_name or f'{character}-lora'}")
+
+        # 显示当前训练状态（如果是继续训练）
+        if training_analysis and training_analysis.get("status") == "analyzed":
+            current_loss = training_analysis.get("train_loss")
+            token_accuracy = training_analysis.get("token_accuracy", 0)
+
+            print(f"\n" + "📊" + " 当前状态 ".center(32, "-"))
+            if current_loss is not None:
+                if current_loss < 0.5:
+                    status_color = "🟢"
+                elif current_loss < 1.0:
+                    status_color = "🟡"
+                else:
+                    status_color = "🟠"
+                print(f"{status_color} Loss: {current_loss:.4f} | 🎯 准确率: {token_accuracy:.1%}")
+
+        print(f"\n" + "🚀" + " 执行流程 ".center(32, "-"))
+        steps = [
+            "✅ 环境检查", "✅ 数据验证", "⏳ LoRA训练", "⏳ 模型合并"
+        ]
+        if ollama_name:
+            steps.append("⏳ 导入Ollama")
+
+        print(" → ".join(steps))
+        print("=" * 48)
 
     def start_training(self, character: str, background: bool = False, export_ollama: bool = False, ollama_name: str = None):
         """启动训练"""
@@ -907,35 +1256,43 @@ class SmartTrainer:
                             log_history = trainer_state.get('log_history', [])
                             last_loss = log_history[-1].get('loss', 'N/A') if log_history else 'N/A'
                             current_epoch_for_resume = float(current_epoch) if current_epoch is not None else 0.0
-                            
+
+                            # 智能训练效果分析
+                            training_analysis = self._analyze_training_performance(log_history, current_epoch)
+
                             total_epochs = training_params.get('epochs', 3.0)
                             remaining_epochs = max(0.1, total_epochs - current_epoch)
-                            
+
                             print(f"📍 将从检查点继续训练: {latest_checkpoint.name}")
-                            print(f"   当前epoch: {current_epoch:.2f}")
-                            print(f"   训练步数: {global_step}")
-                            print(f"   最新loss: {last_loss}")
-                            print(f"   剩余epochs: {remaining_epochs:.2f}")
-                            
-                            if current_epoch >= total_epochs - 0.1:
-                                print(f"⚠️  警告：训练已接近完成（{current_epoch:.2f}/{total_epochs} epochs）")
-                                print(f"   你选择“继续训练”时，可以在此基础上再额外训练一些 epochs（更像微调风格稳定性，不会凭空增加常识能力）。")
-                                try:
-                                    extra = input("请输入要额外继续训练的 epochs（默认 1.0，输入 0 取消继续训练）: ").strip()
-                                    if extra == "":
-                                        extra_epochs = 1.0
-                                    else:
-                                        extra_epochs = float(extra)
-                                    if extra_epochs <= 0:
-                                        print("👋 已取消继续训练")
-                                        return
-                                    # 关键：transformers/trl 的 resume 语义是“训练到总 epochs”，不是“追加 epochs”
-                                    # 所以这里需要把 --num_train_epochs 设置为 current_epoch + extra_epochs
-                                    total_epochs_target = max(0.1, float(current_epoch_for_resume or 0.0) + float(extra_epochs))
-                                    print(f"📊 将额外继续训练 {extra_epochs:.2f} epochs（目标总epochs: {total_epochs_target:.2f}）")
-                                except Exception:
-                                    # 输入异常时，保持原逻辑（至少继续一点点）
-                                    pass
+                            print(f"   当前epoch: {current_epoch:.2f} | 训练步数: {global_step}")
+
+                            # 🎯 首先显示简洁的状态概览（用户最想要的信息）
+                            self.show_training_status_quick(training_analysis)
+
+                            # 智能继续训练建议（基于训练效果而不是epochs数）
+                            self._show_continue_training_recommendation(training_analysis, current_epoch, total_epochs)
+
+                            # 详细分析（可选展开查看）
+                            show_details = input("\n是否显示详细训练分析? (y/N): ").strip().lower()
+                            if show_details in ['y', 'yes']:
+                                self._show_training_analysis(training_analysis)
+
+                            try:
+                                extra = input("请输入要额外继续训练的 epochs（默认 1.0，输入 0 取消继续训练）: ").strip()
+                                if extra == "":
+                                    extra_epochs = 1.0
+                                else:
+                                    extra_epochs = float(extra)
+                                if extra_epochs <= 0:
+                                    print("👋 已取消继续训练")
+                                    return
+                                # 关键：transformers/trl 的 resume 语义是"训练到总 epochs"，不是"追加 epochs"
+                                # 所以这里需要把 --num_train_epochs 设置为 current_epoch + extra_epochs
+                                total_epochs_target = max(0.1, float(current_epoch_for_resume or 0.0) + float(extra_epochs))
+                                print(f"📊 将额外继续训练 {extra_epochs:.2f} epochs（目标总epochs: {total_epochs_target:.2f}）")
+                            except Exception:
+                                # 输入异常时，保持原逻辑（至少继续一点点）
+                                pass
                             
                             # 显示所有可用checkpoint供参考
                             if len(checkpoint_info) > 1:
@@ -998,6 +1355,50 @@ class SmartTrainer:
             "--merge_and_save",  # 自动合并并保存
             "--merged_dir", f"out/merged_{character}"
         ])
+
+        # 统计训练数据样本数量
+        train_count = self.count_samples(Path(train_path))
+        val_count = self.count_samples(Path(val_path)) if val_path else 0
+
+        # 获取训练轮数用于显示
+        epochs = training_params.get('epochs', 3.0)
+        if resume_from_checkpoint and total_epochs_target is not None:
+            epochs = total_epochs_target
+        elif resume_from_checkpoint and remaining_epochs:
+            epochs = remaining_epochs
+
+        # 获取训练分析信息（如果是继续训练）
+        current_training_analysis = None
+        if resume_from_checkpoint:
+            # 如果是继续训练，尝试获取当前训练状态进行显示
+            lora_dir = Path(f"out/lora_{character}")
+            if lora_dir.exists():
+                try:
+                    # 查找最新checkpoint的训练状态
+                    checkpoint_files = list(lora_dir.glob('checkpoint-*'))
+                    if checkpoint_files:
+                        latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
+                        trainer_state_file = latest_checkpoint / "trainer_state.json"
+                        if trainer_state_file.exists():
+                            import json
+                            with open(trainer_state_file, 'r', encoding='utf-8') as f:
+                                trainer_state = json.load(f)
+                                log_history = trainer_state.get('log_history', [])
+                                current_epoch = trainer_state.get('epoch', 0)
+                                current_training_analysis = self._analyze_training_performance(log_history, current_epoch)
+                except Exception:
+                    pass
+
+        # 显示训练信息概览
+        self.show_training_info(
+            character=character,
+            model_name=base_model or "Qwen/Qwen2.5-0.5B-Instruct",
+            epochs=epochs,
+            ollama_name=ollama_name,
+            train_count=train_count,
+            val_count=val_count,
+            training_analysis=current_training_analysis
+        )
 
         print(f"📝 执行命令: {' '.join(cmd)}")
 
@@ -1282,7 +1683,37 @@ You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
 
         stop_lines = "\n".join([f'PARAMETER stop "{s}"' for s in stop_list if s])
 
-        modelfile_content = f"""FROM {gguf_path}
+        # 检查是否已有Modelfile，询问用户是否使用现有的
+        permanent_modelfile = gguf_out.parent / "Modelfile"
+        use_existing = False
+
+        if permanent_modelfile.exists():
+            print(f"\n📋 发现已存在的Modelfile: {permanent_modelfile}")
+            try:
+                with open(permanent_modelfile, 'r', encoding='utf-8') as f:
+                    existing_content = f.read()
+
+                print("📝 现有Modelfile内容预览:")
+                preview_lines = existing_content.split('\n')[:10]  # 显示前10行
+                for line in preview_lines:
+                    if line.strip():
+                        print(f"   {line}")
+                if len(existing_content.split('\n')) > 10:
+                    print("   ...")
+
+                choice = input("\n🤔 是否使用现有的Modelfile？(Y/n，回车默认使用): ").strip().lower()
+                if choice in ['', 'y', 'yes']:
+                    use_existing = True
+                    modelfile_content = existing_content
+                    print("✅ 将使用现有的Modelfile")
+                else:
+                    print("🔄 将从配置重新生成Modelfile")
+            except Exception as e:
+                print(f"⚠️  读取现有Modelfile失败: {e}，将重新生成")
+
+        if not use_existing:
+            # 重新生成Modelfile内容
+            modelfile_content = f"""FROM {gguf_path}
 # 更稳的角色扮演推理参数（减少跑偏与长篇刷题）
 PARAMETER temperature {temperature}
 PARAMETER top_p {top_p}
@@ -1296,13 +1727,18 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
 """
 
         try:
-            # 使用ollama create命令
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.modelfile', delete=False) as f:
-                f.write(modelfile_content)
-                modelfile_path = f.name
+            # 保存永久Modelfile到模型目录（如果不是使用现有的）
+            if not use_existing:
+                with open(permanent_modelfile, 'w', encoding='utf-8') as f:
+                    f.write(modelfile_content)
+                print(f"💾 Modelfile已保存到: {permanent_modelfile}")
+            else:
+                print(f"📄 使用现有Modelfile: {permanent_modelfile}")
 
-            cmd = f"ollama create {ollama_name} -f {modelfile_path}"
+            print(f"📝 可手动编辑此文件来调整推理参数")
+
+            # 使用模型目录中的永久Modelfile进行导入
+            cmd = f"ollama create {ollama_name} -f {permanent_modelfile}"
             print(f"执行: {cmd}")
 
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -1310,6 +1746,7 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
             if result.returncode == 0:
                 print(f"✅ 成功导入到Ollama: {ollama_name}")
                 print(f"🧪 测试命令: ollama run {ollama_name}")
+                print(f"🔧 如需调整参数，可编辑: {permanent_modelfile}")
                 return True
             else:
                 print(f"❌ 导入失败: {result.stderr}")

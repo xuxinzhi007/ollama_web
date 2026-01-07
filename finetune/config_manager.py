@@ -9,12 +9,24 @@ from pathlib import Path
 from typing import Dict, Any
 
 class ConfigManager:
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "config.yaml", character: str = None):
         self.config_path = Path(config_path)
+        self.character = character
+        self.character_config_path = Path("character_configs.yaml")
         self.config = self.load_config()
 
     def load_config(self) -> Dict[str, Any]:
-        """加载配置文件"""
+        """智能加载配置文件 - 支持角色配置和传统配置"""
+
+        # 优先尝试从角色配置读取
+        if self.character and self.character_config_path.exists():
+            try:
+                return self._load_from_character_config()
+            except Exception as e:
+                print(f"⚠️  从角色配置加载失败: {e}")
+                print("💡 回退到传统配置")
+
+        # 回退到传统 config.yaml 方式
         if not self.config_path.exists():
             print(f"⚠️  配置文件不存在: {self.config_path}")
             print("💡 使用默认配置")
@@ -72,6 +84,79 @@ class ConfigManager:
                 "report_to": "none"
             }
         }
+
+    def _load_from_character_config(self) -> Dict[str, Any]:
+        """从角色配置文件加载并转换为标准格式"""
+        print(f"📋 从角色配置加载: {self.character}")
+
+        with open(self.character_config_path, 'r', encoding='utf-8') as f:
+            char_configs = yaml.safe_load(f)
+
+        if 'characters' not in char_configs or self.character not in char_configs['characters']:
+            raise ValueError(f"角色 '{self.character}' 在配置文件中未找到")
+
+        char_config = char_configs['characters'][self.character]
+        training_params = char_config.get('training_params', {})
+
+        # 将角色配置转换为标准 config.yaml 格式
+        standard_config = {
+            "model": {
+                "base_model": training_params.get('base_model', "Qwen/Qwen2.5-0.5B-Instruct"),
+                "model_type": "qwen"
+            },
+            "training": {
+                "epochs": training_params.get('epochs', 2.0),
+                "learning_rate": training_params.get('learning_rate', 2e-4),
+                "warmup_ratio": 0.03,  # 使用默认值
+                "weight_decay": 0.0,   # 使用默认值
+                "seed": 42             # 使用默认值
+            },
+            "lora": {
+                "rank": training_params.get('lora_r', 8),      # 注意：角色配置用 lora_r
+                "alpha": training_params.get('lora_alpha', 16), # 角色配置用 lora_alpha
+                "dropout": training_params.get('lora_dropout', 0.05) # 角色配置用 lora_dropout
+            },
+            "data": {
+                "max_seq_length": 0,
+                "batch_size": 0,
+                "gradient_accumulation": 0
+            },
+            "logging": {
+                "logging_steps": 10,
+                "save_steps": 200,
+                "eval_steps": 200
+            },
+            "ollama": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "repeat_penalty": 1.05,
+                "context_length": 4096
+            },
+            "advanced": {
+                "gradient_checkpointing": False,
+                "no_eval": False,
+                "report_to": "none"
+            }
+        }
+
+        # 如果角色配置有推理参数，覆盖 ollama 配置
+        inference_params = char_config.get('inference_params', {})
+        if inference_params:
+            standard_config["ollama"].update({
+                "temperature": inference_params.get('temperature', 0.7),
+                "top_p": inference_params.get('top_p', 0.9),
+                "top_k": inference_params.get('top_k', 40),
+                "repeat_penalty": inference_params.get('repeat_penalty', 1.05),
+                "context_length": inference_params.get('num_predict', 4096)
+            })
+
+        print(f"✅ 角色配置转换成功: {self.character}")
+        print(f"🤖 使用模型: {standard_config['model']['base_model']}")
+        print(f"🔄 训练轮数: {standard_config['training']['epochs']}")
+        print(f"🔧 LoRA rank: {standard_config['lora']['rank']}")
+
+        return standard_config
 
     def get(self, key_path: str, default=None):
         """获取配置值 (支持嵌套路径，如 'model.base_model')"""
