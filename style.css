@@ -57,11 +57,18 @@ body {
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 
-/* 布局结构 */
-.container { display: flex; height: 100vh; width: 100%; position: relative; }
+/* 布局结构 - 修复高度计算和溢出问题 */
+.container {
+    display: flex;
+    height: 100vh;
+    height: 100dvh; /* 动态视口高度，适配移动端浏览器 */
+    width: 100%;
+    position: relative;
+    overflow: hidden; /* 防止整体页面滚动 */
+}
 
 /* 侧边栏 - 磨砂玻璃效果 */
-.sidebar { 
+.sidebar {
     width: var(--sidebar-width);
     background: var(--bg-sidebar);
     backdrop-filter: blur(20px);
@@ -73,6 +80,8 @@ body {
     z-index: 100;
     transition: transform var(--transition-smooth);
     flex-shrink: 0;
+    overflow-y: auto; /* 确保侧边栏内容可滚动 */
+    overscroll-behavior: contain; /* 防止滚动传播 */
 }
 
 .sidebar h3 {
@@ -574,4 +583,634 @@ input:focus, select:focus, textarea:focus {
 .welcome-tab.active {
     color: #3b82f6;
     border-bottom-color: #3b82f6;
+}
+
+
+/* ============ 训练模块样式 ============ */
+
+
+/* 任务列表项 */
+.task-item {
+    padding: 14px 16px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-md);
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    border: 1px solid transparent;
+}
+
+.task-item:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: var(--border-color);
+}
+
+/* 状态徽章 */
+.status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.status-pending {
+    background: rgba(156, 163, 175, 0.2);
+    color: #9ca3af;
+}
+
+.status-running {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    animation: pulse 2s infinite;
+}
+
+.status-completed {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+}
+
+.status-failed {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.status-stopped, .status-interrupted {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* 进度条 */
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: var(--primary-gradient);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+
+/* 危险按钮 */
+button.danger {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+button.danger:hover {
+    background: rgba(239, 68, 68, 0.3);
+}
+
+
+/* ============ 训练模块高级样式 ============ */
+
+/* 数据集预览 */
+.dataset-preview {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-top: 8px;
+    border-left: 3px solid #3b82f6;
+}
+
+.dataset-sample {
+    font-size: 12px;
+    font-family: monospace;
+    margin-bottom: 8px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+
+
+
+
+/* 任务详情模态框 */
+.task-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.task-modal-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    width: 100%;
+    max-width: 800px;
+    max-height: 90vh;
+    overflow-y: auto;
+    backdrop-filter: blur(20px);
+}
+
+.task-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.task-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color var(--transition-fast);
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+/* 导入状态指示器 */
+.import-status {
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.import-progress {
+    margin: 8px 0;
+}
+
+.import-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.import-step .icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+}
+
+.import-step.pending .icon {
+    background: var(--text-tertiary);
+}
+
+.import-step.running .icon {
+    background: #3b82f6;
+    animation: pulse 2s infinite;
+}
+
+.import-step.completed .icon {
+    background: #10b981;
+}
+
+.import-step.failed .icon {
+    background: #ef4444;
+}
+
+/* ============ 移动端响应式样式 ============ */
+
+/* 平板端优化 (≤ 768px) */
+@media (max-width: 768px) {
+
+
+    /* 任务模态框 */
+    .task-modal {
+        padding: 12px;
+    }
+
+    .task-modal-content {
+        padding: 20px;
+    }
+
+}
+
+/* 手机端优化 (≤ 480px) */
+@media (max-width: 480px) {
+
+    /* 按钮优化 */
+    button {
+        padding: 8px 12px;
+        font-size: 13px;
+        min-height: 40px; /* 确保触摸目标足够大 */
+    }
+
+    /* 任务列表项 */
+    .task-item {
+        padding: 12px;
+    }
+
+    /* 状态徽章 */
+    .status-badge {
+        font-size: 10px;
+        padding: 2px 8px;
+    }
+
+}
+
+/* 超小屏优化 (≤ 360px) */
+@media (max-width: 360px) {
+
+
+    button {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+}
+
+/* ============ 表单验证样式 ============ */
+
+/* 错误字段样式 */
+.field-error {
+    border-color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.05) !important;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2) !important;
+}
+
+.field-error:focus {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important;
+}
+
+/* 字段错误消息 */
+.field-error-message {
+    display: none;
+    color: #ef4444;
+    font-size: 12px;
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid #ef4444;
+    border-radius: 0 4px 4px 0;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 验证摘要样式 */
+.validation-summary {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.validation-header {
+    font-weight: 500;
+    color: #ef4444;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.validation-list {
+    margin: 0;
+    padding-left: 20px;
+    color: #dc2626;
+}
+
+.validation-list li {
+    margin-bottom: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+/* 成功验证样式 */
+.field-success {
+    border-color: #10b981 !important;
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2) !important;
+}
+
+/* 验证提示工具提示 */
+.validation-hint {
+    position: relative;
+    display: inline-block;
+    margin-left: 4px;
+    color: var(--text-tertiary);
+    cursor: help;
+}
+
+.validation-hint:hover::after {
+    content: attr(data-hint);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-bottom: 4px;
+}
+
+/* 表单组增强 */
+.form-group {
+    position: relative;
+    margin-bottom: 16px;
+}
+
+.form-group.has-error .field-error-message {
+    display: block;
+}
+
+/* 实时验证指示器 */
+.validation-indicator {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 14px;
+    pointer-events: none;
+}
+
+.validation-indicator.valid {
+    color: #10b981;
+}
+
+.validation-indicator.invalid {
+    color: #ef4444;
+}
+
+.validation-indicator.validating {
+    color: #f59e0b;
+    animation: pulse 1s infinite;
+}
+
+/* 高级验证提示面板 */
+.validation-tips {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.validation-tips .tip-title {
+    font-weight: 500;
+    color: #3b82f6;
+    margin-bottom: 6px;
+}
+
+.validation-tips ul {
+    margin: 0;
+    padding-left: 16px;
+}
+
+.validation-tips li {
+    margin-bottom: 2px;
+}
+
+/* 显存预估提示 */
+.memory-estimate {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+.memory-estimate.warning {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.2);
+    color: #dc2626;
+}
+
+.memory-estimate.safe {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.2);
+    color: #059669;
+}
+
+/* 参数建议标签 */
+.param-suggestion {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(139, 92, 246, 0.1);
+    color: #8b5cf6;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 12px;
+    margin-left: 8px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.param-suggestion:hover {
+    background: rgba(139, 92, 246, 0.2);
+}
+
+/* 移动端验证样式优化 */
+@media (max-width: 768px) {
+    .field-error-message {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+
+    .validation-summary {
+        padding: 12px;
+    }
+
+    .validation-header {
+        font-size: 13px;
+    }
+
+    .validation-list li {
+        font-size: 12px;
+    }
+
+    .validation-tips {
+        padding: 8px;
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 480px) {
+    .field-error-message {
+        font-size: 10px;
+        padding: 2px 4px;
+    }
+
+    .validation-summary {
+        padding: 8px;
+    }
+
+    .validation-tips {
+        padding: 6px;
+        font-size: 10px;
+    }
+
+    .param-suggestion {
+        font-size: 9px;
+        padding: 1px 4px;
+    }
+}
+
+/* ============ 训练界面增强样式 ============ */
+
+/* 快捷按钮样式 */
+.quick-buttons {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.quick-buttons button {
+    padding: 4px 10px;
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.quick-buttons button:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+.quick-buttons button:active {
+    transform: translateY(0);
+}
+
+/* 参数帮助提示样式 */
+.param-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 50%;
+    font-size: 10px;
+    color: #60a5fa;
+    cursor: help;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.param-help:hover {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #93c5fd;
+    transform: scale(1.1);
+}
+
+/* 验证错误样式优化 */
+.validation-summary {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+.validation-header {
+    font-weight: 600;
+    color: #fca5a5;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.validation-list {
+    margin: 0;
+    padding-left: 16px;
+    color: #fecaca;
+}
+
+.validation-list li {
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+
+/* 训练界面响应式优化 */
+@media (max-width: 768px) {
+    .quick-buttons {
+        gap: 4px;
+    }
+
+    .quick-buttons button {
+        padding: 3px 8px;
+        font-size: 10px;
+    }
+
+    .param-help {
+        width: 14px;
+        height: 14px;
+        font-size: 9px;
+    }
+
+}
+
+@media (max-width: 480px) {
+    .quick-buttons button {
+        padding: 2px 6px;
+        font-size: 9px;
+    }
+
+    .param-help {
+        width: 12px;
+        height: 12px;
+        font-size: 8px;
+    }
 }

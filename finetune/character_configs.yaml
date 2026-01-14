@@ -40,7 +40,7 @@ characters:
 
       # 基础模型：要微调的原始大语言模型
       # 💡 其他选择：Qwen2.5-1.5B、3B等更大模型效果更好但需更多资源
-      base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+      base_model: "Qwen/Qwen2.5-0.5B-Instruct"
 
       # 随机种子：确保训练结果可重现
       # 💡 调整建议：固定值(如42)确保每次训练结果一致，不同值产生不同的随机性

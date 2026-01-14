@@ -27,6 +27,32 @@ import zipfile
 import urllib.request
 import urllib.error
 
+try:
+    import questionary
+except ImportError:
+    questionary = None
+
+def ask_confirm(message: str, default: bool = True) -> bool:
+    """统一的确认对话框"""
+    if questionary:
+        return questionary.confirm(message, default=default).ask()
+    else:
+        suffix = " (Y/n)" if default else " (y/N)"
+        response = input(f"{message}{suffix}: ").strip().lower()
+        if default:
+            return response in ['', 'y', 'yes']
+        else:
+            return response in ['y', 'yes']
+
+def ask_text(message: str, default: str = "") -> str:
+    """统一的文本输入"""
+    if questionary:
+        return questionary.text(message, default=default).ask() or default
+    else:
+        suffix = f" (默认: {default})" if default else ""
+        response = input(f"{message}{suffix}: ").strip()
+        return response if response else default
+
 # Windows编码处理：设置UTF-8输出以支持emoji和中文
 if sys.platform == 'win32':
     try:
@@ -444,10 +470,18 @@ class SmartTrainer:
         dataset_info = self.scan_datasets()
         characters = list(self.config.get('characters', {}).keys())
 
+        if not characters:
+            print("\n❌ 没有可用的角色配置")
+            sys.exit(1)
+
         print("\n🎭 请选择要训练的角色:")
         print("=" * 40)
 
-        for i, char_name in enumerate(characters, 1):
+        # 准备选择列表
+        char_choices = []
+        char_info_map = {}
+
+        for char_name in characters:
             char_config = self.config['characters'][char_name]
             name = char_config.get('name', char_name)
             desc = char_config.get('description', '无描述')
@@ -486,29 +520,46 @@ class SmartTrainer:
                     val_count = sum(self.count_samples(f) for f in info['val_files'])
 
             if train_count > 0:
-                status = f"✅ {train_count}训练样本"
-                if val_count > 0:
-                    status += f", {val_count}验证样本"
+                status = f"✅ {train_count}训练, {val_count}验证" if val_count > 0 else f"✅ {train_count}训练"
 
-            print(f"{i:2d}. {name} - {desc}")
-            print(f"    {status}")
+            # 格式化选项
+            choice_text = f"{name} - {status}"
+            char_choices.append(choice_text)
+            char_info_map[choice_text] = char_name
 
-        while True:
-            try:
-                choice = input(f"\n请输入选择 (1-{len(characters)}): ").strip()
-                if not choice:
-                    continue
+        if questionary:
+            # 使用箭头选择
+            selected = questionary.select(
+                "选择角色:",
+                choices=char_choices
+            ).ask()
 
-                idx = int(choice) - 1
-                if 0 <= idx < len(characters):
-                    return characters[idx]
-                else:
-                    print("❌ 无效选择，请重新输入")
-            except ValueError:
-                print("❌ 请输入数字")
-            except KeyboardInterrupt:
+            if not selected:
                 print("\n👋 训练已取消")
                 sys.exit(0)
+
+            return char_info_map[selected]
+        else:
+            # 降级到传统数字输入
+            for i, (char_name, choice_text) in enumerate(zip(characters, char_choices), 1):
+                print(f"{i:2d}. {choice_text}")
+
+            while True:
+                try:
+                    choice = input(f"\n请输入选择 (1-{len(characters)}): ").strip()
+                    if not choice:
+                        continue
+
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(characters):
+                        return characters[idx]
+                    else:
+                        print("❌ 无效选择，请重新输入")
+                except ValueError:
+                    print("❌ 请输入数字")
+                except KeyboardInterrupt:
+                    print("\n👋 训练已取消")
+                    sys.exit(0)
 
     def check_prerequisites(self, character: str) -> bool:
         """检查训练前置条件"""
@@ -551,100 +602,332 @@ class SmartTrainer:
         return True
 
     def show_main_menu(self):
-        """显示主菜单（整合quick_start.sh功能）"""
+        """显示主菜单（按工作流程组织）"""
         while True:
             print("\n" + "="*50)
             print("🚀 智能LoRA训练系统 - 主菜单")
             print("="*50)
-            print("1) 🎭 角色训练（智能文件匹配）")
-            print("2) 📊 数据集管理")
-            print("3) 🔍 系统状态检查")
-            print("4) 🤖 Ollama模型管理")
-            print("5) 🧪 模型测试")
-            print("0) 退出")
-            print()
 
             try:
-                choice = input("请选择 (0-5): ").strip()
+                if questionary:
+                    # 使用 questionary 的箭头选择
+                    choices = [
+                        "🎨 角色开发  - 创建和管理角色",
+                        "🚀 模型训练  - 训练角色模型",
+                        "📦 模型部署  - 导入和测试模型",
+                        "🔧 系统工具  - 环境检查和数据验证",
+                        "🚪 退出"
+                    ]
 
-                if choice == "1":
-                    self._menu_character_training()
-                elif choice == "2":
-                    self._menu_dataset_management()
-                elif choice == "3":
-                    self._menu_system_status()
-                elif choice == "4":
-                    self._menu_ollama_management()
-                elif choice == "5":
-                    self._menu_model_testing()
-                elif choice == "0":
-                    print("👋 再见！")
-                    break
+                    choice = questionary.select(
+                        "请选择功能:",
+                        choices=choices,
+                        instruction="(使用↑↓箭头选择，回车确认)"
+                    ).ask()
+
+                    if not choice:  # 用户取消
+                        print("\n👋 再见！")
+                        break
+
+                    if "角色开发" in choice:
+                        self._menu_character_development()
+                    elif "模型训练" in choice:
+                        self._menu_model_training()
+                    elif "模型部署" in choice:
+                        self._menu_model_deployment()
+                    elif "系统工具" in choice:
+                        self._menu_system_tools()
+                    elif "退出" in choice:
+                        print("👋 再见！")
+                        break
                 else:
-                    print("❌ 无效选择")
+                    # 降级到传统数字输入
+                    print("\n📋 按工作流程选择:")
+                    print("1) 🎨 角色开发  - 创建和管理角色")
+                    print("2) 🚀 模型训练  - 训练角色模型")
+                    print("3) 📦 模型部署  - 导入和测试模型")
+                    print("4) 🔧 系统工具  - 环境检查和数据验证")
+                    print("0) 退出")
+                    print()
+
+                    choice = input("请选择 (0-4): ").strip()
+
+                    if choice == "1":
+                        self._menu_character_development()
+                    elif choice == "2":
+                        self._menu_model_training()
+                    elif choice == "3":
+                        self._menu_model_deployment()
+                    elif choice == "4":
+                        self._menu_system_tools()
+                    elif choice == "0":
+                        print("👋 再见！")
+                        break
+                    else:
+                        print("❌ 无效选择")
 
             except (KeyboardInterrupt, EOFError):
                 print("\n👋 再见！")
                 break
 
-    def _menu_character_training(self):
-        """菜单：角色训练"""
-        print("\n🎭 角色训练选项:")
-        print("1) 交互式选择角色")
-        print("2) 查看所有配置")
-        print("3) 扫描数据集状态")
-        print("4) 检查模型缓存")
+    def _menu_character_development(self):
+        """菜单：角色开发"""
+        from character_manager import CharacterManager
+        manager = CharacterManager()
 
-        choice = input("选择 (1-4): ").strip()
+        print("\n" + "="*50)
+        print("🎨 角色开发")
+        print("="*50)
 
-        if choice == "1":
+        if questionary:
+            # 使用箭头选择
+            choices = [
+                "🆕 创建新角色",
+                "📋 查看所有角色",
+                "🔍 查看角色详情",
+                "🗑️  删除角色",
+                "📊 数据集统计",
+                "🔙 返回主菜单"
+            ]
+
+            choice = questionary.select(
+                "选择操作:",
+                choices=choices
+            ).ask()
+
+            if not choice or "返回" in choice:
+                return
+        else:
+            # 降级到传统输入
+            print("1) 🆕 创建新角色")
+            print("2) 📋 查看所有角色")
+            print("3) 🔍 查看角色详情")
+            print("4) 🗑️  删除角色")
+            print("5) 📊 数据集统计")
+            print("0) 返回")
+            choice = input("\n选择 (0-5): ").strip()
+
+        # 处理选择
+        if "创建新角色" in choice or choice == "1":
+            # 创建新角色
+            print("\n📝 启动角色创建工具...\n")
+            manager.create_character()
+
+        elif "查看所有角色" in choice or choice == "2":
+            # 列出所有角色
+            characters = manager.list_characters()
+            if not characters:
+                print("\n❌ 当前没有角色")
+                return
+
+            print(f"\n📋 当前有 {len(characters)} 个角色:")
+            print("="*50)
+            for char_id in characters:
+                char_info = manager.get_character_info(char_id)
+                name = char_info.get('name', '未命名')
+                desc = char_info.get('description', '无描述')
+                print(f"\n🎭 {char_id}")
+                print(f"   名字: {name}")
+                print(f"   描述: {desc}")
+
+        elif "查看角色详情" in choice or choice == "3":
+            # 查看角色详情
+            characters = manager.list_characters()
+            if not characters:
+                print("\n❌ 当前没有角色")
+                return
+
+            if questionary:
+                # 使用箭头选择角色
+                char_choices = []
+                for char_id in characters:
+                    char_info = manager.get_character_info(char_id)
+                    name = char_info.get('name', '未命名')
+                    char_choices.append(f"{char_id} - {name}")
+
+                selected = questionary.select(
+                    "选择要查看的角色:",
+                    choices=char_choices
+                ).ask()
+
+                if selected:
+                    char_id = selected.split(" - ")[0]
+                    manager.show_character_details(char_id)
+            else:
+                print(f"\n📋 可用角色:")
+                for i, char_id in enumerate(characters, 1):
+                    char_info = manager.get_character_info(char_id)
+                    print(f"{i}) {char_id} - {char_info.get('name', '未命名')}")
+
+                try:
+                    idx = int(input("\n选择角色编号: ").strip()) - 1
+                    if 0 <= idx < len(characters):
+                        manager.show_character_details(characters[idx])
+                    else:
+                        print("❌ 无效的编号")
+                except ValueError:
+                    print("❌ 请输入数字")
+
+        elif "删除角色" in choice or choice == "4":
+            # 删除角色
+            characters = manager.list_characters()
+            if not characters:
+                print("\n❌ 当前没有角色")
+                return
+
+            if questionary:
+                # 使用箭头选择要删除的角色
+                char_choices = []
+                for char_id in characters:
+                    char_info = manager.get_character_info(char_id)
+                    name = char_info.get('name', '未命名')
+                    char_choices.append(f"{char_id} - {name}")
+
+                selected = questionary.select(
+                    "选择要删除的角色:",
+                    choices=char_choices
+                ).ask()
+
+                if selected:
+                    char_id = selected.split(" - ")[0]
+                    manager.delete_character(char_id, confirm=True)
+            else:
+                print(f"\n📋 可删除的角色:")
+                for i, char_id in enumerate(characters, 1):
+                    char_info = manager.get_character_info(char_id)
+                    print(f"{i}) {char_id} - {char_info.get('name', '未命名')}")
+
+                try:
+                    idx = int(input("\n选择要删除的角色编号: ").strip()) - 1
+                    if 0 <= idx < len(characters):
+                        manager.delete_character(characters[idx], confirm=True)
+                    else:
+                        print("❌ 无效的编号")
+                except ValueError:
+                    print("❌ 请输入数字")
+
+        elif "数据集统计" in choice or choice == "5":
+            # 数据集统计
+            self._show_dataset_stats()
+
+    def _menu_model_training(self):
+        """菜单：模型训练"""
+        print("\n" + "="*50)
+        print("🚀 模型训练")
+        print("="*50)
+
+        if questionary:
+            choices = [
+                "🎯 选择角色开始训练",
+                "📋 查看训练配置",
+                "📊 扫描数据集状态",
+                "💾 检查模型缓存",
+                "🔙 返回主菜单"
+            ]
+
+            choice = questionary.select(
+                "选择操作:",
+                choices=choices
+            ).ask()
+
+            if not choice or "返回" in choice:
+                return
+        else:
+            print("1) 🎯 选择角色开始训练")
+            print("2) 📋 查看训练配置")
+            print("3) 📊 扫描数据集状态")
+            print("4) 💾 检查模型缓存")
+            print("0) 返回")
+            choice = input("\n选择 (0-4): ").strip()
+
+        if "开始训练" in choice or choice == "1":
             character = self.interactive_select()
             if self.check_prerequisites(character):
                 self._confirm_and_train(character)
-        elif choice == "2":
+        elif "训练配置" in choice or choice == "2":
             self.list_configurations()
-        elif choice == "3":
+        elif "扫描数据集" in choice or choice == "3":
             self._show_dataset_scan()
-        elif choice == "4":
+        elif "检查模型缓存" in choice or choice == "4":
             self.check_model_cache()
 
-    def _menu_dataset_management(self):
-        """菜单：数据集管理"""
-        print("\n📊 数据集管理:")
-        print("1) 扫描所有数据集")
-        print("2) 验证数据格式")
-        print("3) 查看数据统计")
+    def _menu_model_deployment(self):
+        """菜单：模型部署"""
+        print("\n" + "="*50)
+        print("📦 模型部署")
+        print("="*50)
 
-        choice = input("选择 (1-3): ").strip()
+        if questionary:
+            choices = [
+                "📥 导入模型到Ollama",
+                "📋 查看Ollama模型列表",
+                "🗑️  删除Ollama模型",
+                "🧪 测试模型效果",
+                "🔙 返回主菜单"
+            ]
 
-        if choice == "1":
-            self._show_dataset_scan()
-        elif choice == "2":
+            choice = questionary.select(
+                "选择操作:",
+                choices=choices
+            ).ask()
+
+            if not choice or "返回" in choice:
+                return
+        else:
+            print("1) 📥 导入模型到Ollama")
+            print("2) 📋 查看Ollama模型列表")
+            print("3) 🗑️  删除Ollama模型")
+            print("4) 🧪 测试模型效果")
+            print("0) 返回")
+            choice = input("\n选择 (0-4): ").strip()
+
+        if "导入模型" in choice or choice == "1":
+            self._import_to_ollama()
+        elif "模型列表" in choice or choice == "2":
+            self._show_ollama_models()
+        elif "删除" in choice or choice == "3":
+            self._delete_ollama_model()
+        elif "测试" in choice or choice == "4":
+            self._test_ollama_model()
+
+    def _menu_system_tools(self):
+        """菜单：系统工具"""
+        print("\n" + "="*50)
+        print("🔧 系统工具")
+        print("="*50)
+
+        if questionary:
+            choices = [
+                "🔍 全面环境诊断",
+                "✅ 验证数据集格式",
+                "💾 查看磁盘使用",
+                "🛠️  环境设置助手",
+                "🔙 返回主菜单"
+            ]
+
+            choice = questionary.select(
+                "选择操作:",
+                choices=choices
+            ).ask()
+
+            if not choice or "返回" in choice:
+                return
+        else:
+            print("1) 🔍 全面环境诊断")
+            print("2) ✅ 验证数据集格式")
+            print("3) 💾 查看磁盘使用")
+            print("4) 🛠️  环境设置助手")
+            print("0) 返回")
+            choice = input("\n选择 (0-4): ").strip()
+
+        if "环境诊断" in choice or choice == "1":
+            self._comprehensive_environment_check()
+        elif "验证数据集" in choice or choice == "2":
             self._validate_all_datasets()
-        elif choice == "3":
-            self._show_dataset_stats()
-
-    def _menu_system_status(self):
-        """菜单：系统状态"""
-        print("\n🔍 系统状态检查:")
-        print("1) 检查模型缓存")
-        print("2) 检查训练环境")
-        print("3) 全面环境诊断")  # 新增
-        print("4) 环境设置助手")   # 新增
-        print("5) 查看磁盘使用")
-
-        choice = input("选择 (1-5): ").strip()
-
-        if choice == "1":
-            self.check_model_cache()
-        elif choice == "2":
-            self._check_training_environment()
-        elif choice == "3":
-            self._comprehensive_environment_check()  # 新增
-        elif choice == "4":
-            self._environment_setup_helper()  # 新增
-        elif choice == "5":
+        elif "磁盘使用" in choice or choice == "3":
             self._check_disk_usage()
+        elif "设置助手" in choice or choice == "4":
+            self._environment_setup_helper()
 
     def _comprehensive_environment_check(self):
         """全面环境诊断"""
@@ -672,32 +955,46 @@ class SmartTrainer:
         print("\n🛠️  环境设置助手")
         print("=" * 40)
 
-        print("1) 🔧 自动环境准备 (推荐)")
-        print("2) 📋 手动设置指南")
-        print("3) 🔍 问题诊断")
-        print("4) 🔄 重置环境")
+        if questionary:
+            choices = [
+                "🔧 自动环境准备 (推荐)",
+                "📋 手动设置指南",
+                "🔍 问题诊断",
+                "🔄 重置环境"
+            ]
 
-        choice = input("\n选择操作 (1-4): ").strip()
+            choice = questionary.select(
+                "选择操作:",
+                choices=choices
+            ).ask()
 
-        if choice == "1":
+            if not choice:
+                return
+        else:
+            print("1) 🔧 自动环境准备 (推荐)")
+            print("2) 📋 手动设置指南")
+            print("3) 🔍 问题诊断")
+            print("4) 🔄 重置环境")
+            choice = input("\n选择操作 (1-4): ").strip()
+
+        if "自动环境准备" in choice or choice == "1":
             # 自动环境准备
             issues = self._check_environment_comprehensive()
             if not issues:
                 print("\n✅ 环境已经准备好了！")
             else:
-                confirm = input("\n检测到环境问题，是否自动修复? (Y/n): ").strip().lower()
-                if confirm in ['', 'y', 'yes']:
+                if ask_confirm("检测到环境问题，是否自动修复?"):
                     self._auto_setup_environment(issues)
 
-        elif choice == "2":
+        elif "手动设置指南" in choice or choice == "2":
             # 手动设置指南
             self._show_manual_setup_guide()
 
-        elif choice == "3":
+        elif "问题诊断" in choice or choice == "3":
             # 问题诊断
             self._diagnose_environment_issues()
 
-        elif choice == "4":
+        elif "重置环境" in choice or choice == "4":
             # 重置环境
             self._reset_environment()
 
@@ -1068,9 +1365,8 @@ class SmartTrainer:
         print("=" * 40)
 
         print("⚠️  这将删除现有的虚拟环境并重新创建")
-        confirm = input("确认要重置环境吗? (y/N): ").strip().lower()
 
-        if confirm in ['y', 'yes']:
+        if ask_confirm("确认要重置环境吗?", default=False):
             import shutil
 
             # 删除现有虚拟环境
@@ -1093,27 +1389,6 @@ class SmartTrainer:
                 print("   ❌ 虚拟环境创建失败")
         else:
             print("👋 重置已取消")
-
-    def _menu_ollama_management(self):
-        """菜单：Ollama管理"""
-        print("\n🤖 Ollama模型管理:")
-        print("1) 查看Ollama模型列表")
-        print("2) 导入训练好的模型到Ollama")
-        print("3) 删除Ollama模型")
-
-        choice = input("选择 (1-3): ").strip()
-
-        if choice == "1":
-            self._show_ollama_models()
-        elif choice == "2":
-            self._import_to_ollama()
-        elif choice == "3":
-            self._delete_ollama_model()
-
-    def _menu_model_testing(self):
-        """菜单：模型测试"""
-        self._test_ollama_model()
-
 
     def estimate_training_time(self, epochs: float, data_size: int = 300) -> str:
         """估算训练时间"""
@@ -1273,16 +1548,12 @@ class SmartTrainer:
                             self._show_continue_training_recommendation(training_analysis, current_epoch, total_epochs)
 
                             # 详细分析（可选展开查看）
-                            show_details = input("\n是否显示详细训练分析? (y/N): ").strip().lower()
-                            if show_details in ['y', 'yes']:
+                            if ask_confirm("\n是否显示详细训练分析?", default=False):
                                 self._show_training_analysis(training_analysis)
 
                             try:
-                                extra = input("请输入要额外继续训练的 epochs（默认 1.0，输入 0 取消继续训练）: ").strip()
-                                if extra == "":
-                                    extra_epochs = 1.0
-                                else:
-                                    extra_epochs = float(extra)
+                                extra = ask_text("请输入要额外继续训练的 epochs（输入 0 取消继续训练）", default="1.0")
+                                extra_epochs = float(extra)
                                 if extra_epochs <= 0:
                                     print("👋 已取消继续训练")
                                     return
@@ -1455,52 +1726,93 @@ class SmartTrainer:
         print()
         print("⚠️  注意：模型目前还没有导入到Ollama，无法直接使用")
         print()
-        print("📋 后续选项：")
-        print("1) 🚀 导入到Ollama（推荐）- 可以立即使用 ollama run 命令")
-        print("2) 📦 稍后导入 - 返回主菜单，通过 4)Ollama模型管理 导入")
-        print("3) 🏠 返回主菜单 - 继续其他操作")
-        print("4) 👋 退出系统")
-        print()
 
-        while True:
-            try:
-                choice = input("请选择 (1-4): ").strip()
+        if questionary:
+            # 使用箭头选择
+            choices = [
+                "🚀 导入到Ollama（推荐）- 可以立即使用",
+                "📦 稍后导入 - 返回主菜单",
+                "🏠 返回主菜单 - 继续其他操作",
+                "👋 退出系统"
+            ]
 
-                if choice == "1":
-                    # 询问Ollama模型名称
-                    if not ollama_name:
-                        default_name = f"{character}-lora"
-                        ollama_name = input(f"请输入Ollama模型名称 (默认: {default_name}): ").strip()
-                        if not ollama_name:
-                            ollama_name = default_name
+            choice = questionary.select(
+                "请选择下一步操作:",
+                choices=choices
+            ).ask()
 
-                    success = self._export_to_ollama(character, ollama_name)
-                    if success:
-                        print(f"\n🎉 导入成功！现在可以使用：")
-                        print(f"   ollama run {ollama_name}")
-                        print()
-                        input("按回车键返回主菜单...")
-                    break
+            if not choice:
+                return
 
-                elif choice == "2":
-                    print("\n💡 提示：稍后可通过主菜单 -> 4)Ollama模型管理 -> 2)导入训练好的模型 来导入")
+            if "导入到Ollama" in choice:
+                # 询问Ollama模型名称
+                if not ollama_name:
+                    default_name = f"{character}-lora"
+                    ollama_name = ask_text("请输入Ollama模型名称", default_name)
+
+                success = self._export_to_ollama(character, ollama_name)
+                if success:
+                    print(f"\n🎉 导入成功！现在可以使用：")
+                    print(f"   ollama run {ollama_name}")
+                    print()
                     input("按回车键返回主菜单...")
+
+            elif "稍后导入" in choice:
+                print("\n💡 提示：稍后可通过主菜单 -> 3)模型部署 -> 1)导入模型到Ollama 来导入")
+                input("按回车键返回主菜单...")
+
+            elif "返回主菜单" in choice:
+                print("\n🏠 返回主菜单...")
+
+            elif "退出" in choice:
+                print("\n👋 感谢使用！")
+                sys.exit(0)
+        else:
+            # 降级到传统数字输入
+            print("📋 后续选项：")
+            print("1) 🚀 导入到Ollama（推荐）- 可以立即使用 ollama run 命令")
+            print("2) 📦 稍后导入 - 返回主菜单，通过 4)Ollama模型管理 导入")
+            print("3) 🏠 返回主菜单 - 继续其他操作")
+            print("4) 👋 退出系统")
+            print()
+
+            while True:
+                try:
+                    choice = input("请选择 (1-4): ").strip()
+
+                    if choice == "1":
+                        # 询问Ollama模型名称
+                        if not ollama_name:
+                            default_name = f"{character}-lora"
+                            ollama_name = ask_text("请输入Ollama模型名称", default_name)
+
+                        success = self._export_to_ollama(character, ollama_name)
+                        if success:
+                            print(f"\n🎉 导入成功！现在可以使用：")
+                            print(f"   ollama run {ollama_name}")
+                            print()
+                            input("按回车键返回主菜单...")
+                        break
+
+                    elif choice == "2":
+                        print("\n💡 提示：稍后可通过主菜单 -> 4)Ollama模型管理 -> 2)导入训练好的模型 来导入")
+                        input("按回车键返回主菜单...")
+                        break
+
+                    elif choice == "3":
+                        print("\n🏠 返回主菜单...")
+                        break
+
+                    elif choice == "4":
+                        print("\n👋 感谢使用！")
+                        sys.exit(0)
+
+                    else:
+                        print("❌ 无效选择，请输入1-4")
+
+                except (KeyboardInterrupt, EOFError):
+                    print("\n\n🏠 返回主菜单...")
                     break
-
-                elif choice == "3":
-                    print("\n🏠 返回主菜单...")
-                    break
-
-                elif choice == "4":
-                    print("\n👋 感谢使用！")
-                    sys.exit(0)
-
-                else:
-                    print("❌ 无效选择，请输入1-4")
-
-            except (KeyboardInterrupt, EOFError):
-                print("\n\n🏠 返回主菜单...")
-                break
 
     def _export_to_ollama(self, character: str, ollama_name: str = None):
         """导出到Ollama"""
@@ -1509,12 +1821,11 @@ class SmartTrainer:
 
         print(f"\n🚀 导出到Ollama: {ollama_name}")
 
-        # 覆盖同名模型：先检测是否存在，存在则删除后重建，避免“看似导入成功但实际还是旧模型”
+        # 覆盖同名模型：先检测是否存在，存在则删除后重建，避免"看似导入成功但实际还是旧模型"
         try:
             show = subprocess.run(["ollama", "show", ollama_name], capture_output=True, text=True)
             if show.returncode == 0:
-                ans = input(f"⚠️ 已存在模型 {ollama_name}，是否覆盖？(Y/n): ").strip().lower()
-                if ans in ["n", "no"]:
+                if not ask_confirm(f"⚠️ 已存在模型 {ollama_name}，是否覆盖?"):
                     print("👋 已取消导入")
                     return False
                 rm = subprocess.run(["ollama", "rm", ollama_name], capture_output=True, text=True)
@@ -1701,8 +2012,7 @@ You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
                 if len(existing_content.split('\n')) > 10:
                     print("   ...")
 
-                choice = input("\n🤔 是否使用现有的Modelfile？(Y/n，回车默认使用): ").strip().lower()
-                if choice in ['', 'y', 'yes']:
+                if ask_confirm("🤔 是否使用现有的Modelfile?"):
                     use_existing = True
                     modelfile_content = existing_content
                     print("✅ 将使用现有的Modelfile")
@@ -1866,14 +2176,12 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
                 self._show_python_upgrade_guide()
                 return
 
-            confirm = input("\n是否立即进行环境初始化? (Y/n): ").strip().lower()
-            if confirm in ['', 'y', 'yes']:
+            if ask_confirm("是否立即进行环境初始化?"):
                 success = self._auto_setup_environment(issues)
                 if success:
                     print("\n🎉 环境准备完成！")
 
-                    cont = input("继续进入训练系统? (Y/n): ").strip().lower()
-                    if cont in ['', 'y', 'yes']:
+                    if ask_confirm("继续进入训练系统?"):
                         self.show_main_menu()
                 else:
                     print("\n⚠️  环境准备遇到问题，请查看上方错误信息")
@@ -2187,42 +2495,68 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
             print("❌ 未找到已训练的模型")
             return
 
-        print("\n📋 可导入的模型:")
-        for i, dir_path in enumerate(merged_dirs, 1):
+        # 构建模型选择列表
+        model_choices = []
+        model_info_map = {}
+
+        for dir_path in merged_dirs:
             character = dir_path.name.replace("merged_", "")
 
             # 尝试从配置文件获取中文名称和描述
             char_config = self.config.get('characters', {}).get(character, {})
-            chinese_name = char_config.get('name', character)  # 如果没有配置，显示英文名
+            chinese_name = char_config.get('name', character)
             description = char_config.get('description', '未配置')
 
-            # 显示：序号) 中文名 (英文代码) - 描述
-            print(f"   {i}) {chinese_name} ({character}) - {description}")
+            # 格式：中文名 (代码) - 描述
+            choice_str = f"{chinese_name} ({character}) - {description}"
+            model_choices.append(choice_str)
+            model_info_map[choice_str] = character
 
-        try:
-            choice = int(input(f"\n请选择模型 (1-{len(merged_dirs)}): "))
-            if 1 <= choice <= len(merged_dirs):
-                selected_dir = merged_dirs[choice - 1]
-                character = selected_dir.name.replace("merged_", "")
+        if questionary:
+            # 使用箭头选择
+            selected = questionary.select(
+                "选择要导入的模型:",
+                choices=model_choices
+            ).ask()
 
-                # 获取中文名称用于确认
-                char_config = self.config.get('characters', {}).get(character, {})
-                chinese_name = char_config.get('name', character)
+            if not selected:
+                print("\n👋 已取消")
+                return
 
-                print(f"\n✅ 已选择: {chinese_name} ({character})")
+            character = model_info_map[selected]
+        else:
+            # 降级到数字输入
+            print("\n📋 可导入的模型:")
+            for i, choice in enumerate(model_choices, 1):
+                print(f"   {i}) {choice}")
 
-                ollama_name = input(f"Ollama模型名称 (默认: {character}-lora): ").strip()
-                if not ollama_name:
-                    ollama_name = f"{character}-lora"
+            try:
+                choice_idx = int(input(f"\n请选择模型 (1-{len(model_choices)}): "))
+                if 1 <= choice_idx <= len(model_choices):
+                    selected = model_choices[choice_idx - 1]
+                    character = model_info_map[selected]
+                else:
+                    print("❌ 无效选择")
+                    return
+            except (ValueError, IndexError):
+                print("❌ 无效选择")
+                return
 
-                self._export_to_ollama(character, ollama_name)
-        except (ValueError, IndexError):
-            print("❌ 无效选择")
+        # 获取中文名称用于确认
+        char_config = self.config.get('characters', {}).get(character, {})
+        chinese_name = char_config.get('name', character)
+        print(f"\n✅ 已选择: {chinese_name} ({character})")
+
+        # 询问Ollama模型名称
+        default_name = f"{character}-lora"
+        ollama_name = ask_text(f"请输入Ollama模型名称", default=default_name)
+
+        self._export_to_ollama(character, ollama_name)
 
     def _delete_ollama_model(self):
         """删除Ollama模型"""
         print("\n🗑️ 删除Ollama模型")
-        model_name = input("输入要删除的模型名称: ").strip()
+        model_name = ask_text("请输入要删除的模型名称", default="")
 
         if model_name:
             try:
@@ -2241,7 +2575,7 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
         # 显示可用模型
         self._show_ollama_models()
 
-        model_name = input("\n输入要测试的模型名称: ").strip()
+        model_name = ask_text("\n请输入要测试的模型名称", default="")
         if model_name:
             test_prompt = "你好，请介绍一下自己。"
             print(f"\n测试提示: {test_prompt}")
@@ -2267,12 +2601,10 @@ SYSTEM \"\"\"{system_prompt}\"\"\"
         ollama_name = None
 
         try:
-            ollama_choice = input("训练完成后是否导入到Ollama? (y/N): ").strip().lower()
-            if ollama_choice in ['y', 'yes']:
+            if ask_confirm("训练完成后是否导入到Ollama?", default=False):
                 export_ollama = True
-                ollama_name = input(f"Ollama模型名称 (默认: {character}-lora): ").strip()
-                if not ollama_name:
-                    ollama_name = f"{character}-lora"
+                default_name = f"{character}-lora"
+                ollama_name = ask_text("请输入Ollama模型名称", default=default_name)
 
             # 直接调用start_training，它会自动检测并处理已有训练结果
             self.start_training(character, export_ollama=export_ollama, ollama_name=ollama_name)
@@ -2462,8 +2794,7 @@ def main():
         if not issues:
             print("\n✅ 环境已经准备好了！")
             if not args.auto:
-                cont = input("是否进入主菜单? (Y/n): ").strip().lower()
-                if cont in ['', 'y', 'yes']:
+                if ask_confirm("是否进入主菜单?"):
                     trainer.show_main_menu()
         else:
             if args.auto:
@@ -2472,13 +2803,11 @@ def main():
                     print("\n🎉 环境准备完成！")
                     trainer.show_main_menu()
             else:
-                confirm = input("\n检测到环境问题，是否自动修复? (Y/n): ").strip().lower()
-                if confirm in ['', 'y', 'yes']:
+                if ask_confirm("检测到环境问题，是否自动修复?"):
                     success = trainer._auto_setup_environment(issues)
                     if success:
                         print("\n🎉 环境准备完成！")
-                        cont = input("是否进入主菜单? (Y/n): ").strip().lower()
-                        if cont in ['', 'y', 'yes']:
+                        if ask_confirm("是否进入主菜单?"):
                             trainer.show_main_menu()
         return
 
@@ -2532,8 +2861,7 @@ def main():
     if not args.yes:
         print(f"\n💡 即将开始训练 '{character}'")
         try:
-            confirm = input("确认开始训练? (y/N): ").strip().lower()
-            if confirm not in ['y', 'yes']:
+            if not ask_confirm("确认开始训练?", default=False):
                 print("👋 训练已取消")
                 return
         except (KeyboardInterrupt, EOFError):

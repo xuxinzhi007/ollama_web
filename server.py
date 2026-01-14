@@ -1,31 +1,48 @@
 #!/usr/bin/env python3
 """
-简单的 HTTP 服务器，用于托管 Ollama Web 面板
+Ollama Web 服务器 - Flask 版本
 """
-import http.server
-import socketserver
-import os
+from flask import Flask, send_from_directory, jsonify
+from flask_cors import CORS
 
 PORT = 8080
+app = Flask(__name__, static_folder='.')
+CORS(app)
 
-class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def end_headers(self):
-        # 添加 CORS 头，允许跨域请求
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        super().end_headers()
+
+# ==================== 静态文件路由 ====================
+
+@app.route('/')
+def index():
+    """主页"""
+    return send_from_directory('.', 'index.html')
+
+@app.route('/<path:path>')
+def static_files(path):
+    """静态文件服务"""
+    return send_from_directory('.', path)
+
+
+# ==================== 健康检查 ====================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """健康检查"""
+    return jsonify({
+        'status': 'ok',
+        'server': 'Ollama Web (Flask)'
+    })
+
+
+# ==================== 主函数 ====================
 
 if __name__ == '__main__':
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    
-    with socketserver.TCPServer(("", PORT), MyHTTPRequestHandler) as httpd:
-        print(f"🚀 Ollama Web 面板已启动！")
-        print(f"📱 访问地址: http://localhost:{PORT}")
-        print(f"⚠️  请确保 Ollama 服务正在运行")
-        print(f"💡 按 Ctrl+C 停止服务\n")
-        
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\n\n👋 服务已停止")
+    print("🚀 Ollama Web 服务器已启动（Flask 版本）！")
+    print(f"📱 Web 界面: http://localhost:{PORT}")
+    print(f"⚠️  请确保 Ollama 服务正在运行 (ollama serve)")
+    print(f"🛑 按 Ctrl+C 停止服务\n")
+
+    try:
+        app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
+    except KeyboardInterrupt:
+        print("\n\n👋 服务已停止")

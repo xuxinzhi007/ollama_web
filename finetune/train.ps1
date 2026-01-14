@@ -315,6 +315,21 @@ foreach ($arg in $args) {
 if (-not $skipCheck) {
     Check-AndInstall-Dependencies
     Check-GPU-Device
+
+    # 检查并安装 questionary（用于箭头选择菜单）
+    $null = python -c "import questionary" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "Installing questionary for better menu experience..." -ForegroundColor Cyan
+        python -m pip install questionary -q
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "questionary installed successfully!" -ForegroundColor Green
+            Write-Host ""
+        } else {
+            Write-Host "questionary installation failed, will use traditional number input" -ForegroundColor Yellow
+            Write-Host ""
+        }
+    }
 }
 
 # 运行智能训练脚本，传递所有参数

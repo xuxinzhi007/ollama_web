@@ -18,5 +18,18 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
+# 检查并安装 questionary（用于箭头选择菜单）
+if ! python -c "import questionary" 2>/dev/null; then
+    echo "📦 正在安装 questionary (箭头选择菜单)..."
+    pip install questionary >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "✅ questionary 安装成功！"
+        echo ""
+    else
+        echo "⚠️  questionary 安装失败，将使用传统数字输入"
+        echo ""
+    fi
+fi
+
 # 运行智能训练脚本
 python smart_train.py "$@"

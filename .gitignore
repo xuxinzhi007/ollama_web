@@ -6,6 +6,9 @@ __pycache__/
 *.pyd
 .Python
 .tools/
+.hypothesis
+.kiro
+
 
 # OS / editor
 .DS_Store
