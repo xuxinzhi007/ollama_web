@@ -6,9 +6,10 @@
 
 import json
 import sys
+import argparse
 from pathlib import Path
 
-def fix_data_format(input_file, output_file, remove_system=True, simplify_system=False):
+def fix_data_format(input_file, output_file, remove_system=True, simplify_system=False, min_content_length=0):
     """
     修复数据格式
     - remove_system: 是否移除每个样本中的system prompt
@@ -18,6 +19,7 @@ def fix_data_format(input_file, output_file, remove_system=True, simplify_system
     
     fixed_count = 0
     total_count = 0
+    skipped_short = 0
     
     with open(input_file, 'r', encoding='utf-8') as f_in, \
          open(output_file, 'w', encoding='utf-8') as f_out:
@@ -35,7 +37,6 @@ def fix_data_format(input_file, output_file, remove_system=True, simplify_system
                 
                 total_count += 1
                 
-                # 简化或移除system prompt
                 new_messages = []
                 for msg in messages:
                     role = msg.get('role', '')
@@ -51,15 +52,24 @@ def fix_data_format(input_file, output_file, remove_system=True, simplify_system
                             simplified = "你是林栀，一个24岁的温柔女孩。文静少言，说话轻软，容易害羞脸红。"
                             new_messages.append({"role": "system", "content": simplified})
                         else:
-                            # 保留原始system prompt
                             new_messages.append(msg)
                     else:
                         new_messages.append(msg)
-                
-                # 如果没有system了，确保至少有一个user和assistant
+
                 if new_messages and new_messages[0].get('role') != 'system':
-                    # 第一个消息应该是user
                     if new_messages[0].get('role') != 'user':
+                        continue
+
+                if min_content_length > 0:
+                    too_short = False
+                    for msg in new_messages:
+                        role = msg.get('role', '')
+                        content = msg.get('content', '')
+                        if role in ("user", "assistant") and len(content.strip()) < min_content_length:
+                            too_short = True
+                            break
+                    if too_short:
+                        skipped_short += 1
                         continue
                 
                 # 写入修复后的数据
@@ -79,6 +89,8 @@ def fix_data_format(input_file, output_file, remove_system=True, simplify_system
                 continue
     
     print(f"✅ 处理完成: {fixed_count}/{total_count} 样本")
+    if skipped_short:
+        print(f"   已过滤过短样本: {skipped_short}")
     return fixed_count
 
 def create_backup(original_file):
@@ -92,6 +104,11 @@ def create_backup(original_file):
 def main():
     print("🔧 修复过拟合问题 - 优化数据格式")
     print("=" * 60)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["remove", "simplify"], help="选择处理system prompt的方式")
+    parser.add_argument("--min_sample_length", type=int, default=0)
+    args = parser.parse_args()
     
     # 处理训练数据
     train_file = Path("datasets/linzhi/train.jsonl")
@@ -113,20 +130,28 @@ def main():
     print("\n选项2: 简化system prompt")
     print("  - 移除格式化的列表")
     print("  - 只保留核心角色设定")
-    
-    choice = input("\n选择方案 (1=移除system, 2=简化system, 其他=取消): ").strip()
-    
-    if choice == "1":
+
+    if args.mode == "remove":
         remove_system = True
         simplify_system = False
         print("\n✅ 将移除所有样本中的system prompt")
-    elif choice == "2":
+    elif args.mode == "simplify":
         remove_system = False
         simplify_system = True
         print("\n✅ 将简化system prompt")
     else:
-        print("已取消")
-        return
+        choice = input("\n选择方案 (1=移除system, 2=简化system, 其他=取消): ").strip()
+        if choice == "1":
+            remove_system = True
+            simplify_system = False
+            print("\n✅ 将移除所有样本中的system prompt")
+        elif choice == "2":
+            remove_system = False
+            simplify_system = True
+            print("\n✅ 将简化system prompt")
+        else:
+            print("已取消")
+            return
     
     # 创建备份
     print("\n创建备份...")
@@ -137,13 +162,13 @@ def main():
     # 处理训练数据
     print("\n处理训练数据...")
     fixed_train = train_file.parent / f"{train_file.stem}_fixed.jsonl"
-    fix_data_format(train_file, fixed_train, remove_system, simplify_system)
+    fix_data_format(train_file, fixed_train, remove_system, simplify_system, args.min_sample_length)
     
     # 处理验证数据
     if val_file.exists():
         print("\n处理验证数据...")
         fixed_val = val_file.parent / f"{val_file.stem}_fixed.jsonl"
-        fix_data_format(val_file, fixed_val, remove_system, simplify_system)
+        fix_data_format(val_file, fixed_val, remove_system, simplify_system, args.min_sample_length)
     
     print("\n" + "=" * 60)
     print("✅ 修复完成！")
@@ -160,4 +185,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

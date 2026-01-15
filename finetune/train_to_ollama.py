@@ -554,22 +554,22 @@ def main():
         print("3) ⏭️  跳过训练 (使用现有模型直接导入)")
         print("4) ❌ 取消操作")
 
-            while True:
-                choice = input("\n请选择 (1-4): ").strip()
-                if choice == "1":
-                    args.continue_train = True
-                    break
-                elif choice == "2":
-                    args.force = True
-                    break
-                elif choice == "3":
-                    args.skip_train = True
-                    break
-                elif choice == "4":
-                    print("操作已取消")
-                    sys.exit(0)
-                else:
-                    print("❌ 无效选择，请输入1-4")
+        while True:
+            choice = input("\n请选择 (1-4): ").strip()
+            if choice == "1":
+                args.continue_train = True
+                break
+            elif choice == "2":
+                args.force = True
+                break
+            elif choice == "3":
+                args.skip_train = True
+                break
+            elif choice == "4":
+                print("操作已取消")
+                sys.exit(0)
+            else:
+                print("❌ 无效选择，请输入1-4")
 
     # 处理继续训练逻辑
     if args.continue_train and local_model_exists:
