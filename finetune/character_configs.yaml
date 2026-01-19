@@ -19,28 +19,70 @@ characters:
     # 训练参数 - 控制模型如何学习角色特征
     training_params:
       # 训练轮数：模型看完所有数据的次数
-      # 💡 调整建议：2-4轮合适，太少学不会，太多会过拟合（背答案）
-      epochs: 3.0
-
-      # 学习率：每次更新参数的步长大小
-      # 💡 调整建议：1e-5到1e-4之间，太大不稳定，太小学不动
+      # 💡 调整建议：折中方案，既能学进知识，又不过度洗脑
+      epochs: 2.0
       learning_rate: 5e-5
-
-      # LoRA rank：低秩适配器的维度，控制可训练参数数量
-      # 💡 调整建议：8-32之间，越大越能学复杂特征，但容易过拟合
-      lora_r: 16
-
-      # LoRA alpha：缩放因子，控制LoRA层的影响强度
-      # 💡 调整建议：通常设为rank的2倍，影响学习的激进程度
-      lora_alpha: 32
-
-      # LoRA dropout：随机丢弃率，防止过拟合
-      # 💡 调整建议：0.05-0.15之间，数据少时用0.1-0.15
-      lora_dropout: 0.1
-
-      # 基础模型：要微调的原始大语言模型
-      # 💡 其他选择：Qwen2.5-1.5B、3B等更大模型效果更好但需更多资源
+      lora_r: 8
+      lora_alpha: 16
+      lora_dropout: 0.05
       base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+
+  # 林栀 (聪明版) - 推荐尝试！
+  # 使用 3B 模型，智商比 1.5B 高很多，但速度依然很快
+  linzhi_smart:
+    name: "林栀(聪明版)"
+    description: "基于Qwen2.5-3B，平衡了智商和速度"
+    data_files:
+      train: "datasets/linzhi/train.jsonl"
+      val: "datasets/linzhi/val.jsonl"
+    system_prompt: |
+      你是林栀，一个24岁的温柔女孩。
+      性格特点：文静少言，说话轻软，容易害羞脸红，内心敏感细腻。在和喜欢的人交流时会含蓄试探，用细节表达好感。
+      请以林栀的身份自然地与用户对话。
+    training_params:
+      epochs: 2.0
+      learning_rate: 5e-5
+      lora_r: 8
+      lora_alpha: 16
+      lora_dropout: 0.05
+      base_model: "Qwen/Qwen2.5-3B-Instruct"
+      seed: 42
+    inference_params:
+      temperature: 0.65
+      top_p: 0.92
+      top_k: 40
+      repeat_penalty: 1.08
+      num_predict: 420
+      stop: ["<|im_end|>"]
+
+  # 林栀 (高智商版) - 电脑配置好必选！
+  # 使用 7B 模型，理解能力和逻辑能力最强，不容易答非所问
+  linzhi_genius:
+    name: "林栀(高智商版)"
+    description: "基于Qwen2.5-7B，逻辑最强，体验最好"
+    data_files:
+      train: "datasets/linzhi/train.jsonl"
+      val: "datasets/linzhi/val.jsonl"
+    system_prompt: |
+      你是林栀，一个24岁的温柔女孩。
+      性格特点：文静少言，说话轻软，容易害羞脸红，内心敏感细腻。在和喜欢的人交流时会含蓄试探，用细节表达好感。
+      请以林栀的身份自然地与用户对话。
+    training_params:
+      epochs: 2.0
+      learning_rate: 5e-5
+      lora_r: 16       # 7B 模型容量大，可以适当增加 rank
+      lora_alpha: 32
+      lora_dropout: 0.05
+      base_model: "Qwen/Qwen2.5-7B-Instruct"
+      seed: 42
+    inference_params:
+      temperature: 0.7
+      top_p: 0.90
+      top_k: 40
+      repeat_penalty: 1.1
+      num_predict: 512
+      stop: ["<|im_end|>"]
+
 
       # 随机种子：确保训练结果可重现
       # 💡 调整建议：固定值(如42)确保每次训练结果一致，不同值产生不同的随机性

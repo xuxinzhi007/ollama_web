@@ -150,8 +150,161 @@ def main() -> None:
         target_modules=list(target_modules),
     )
 
+    # --- 监控回调 ---
+    from transformers import TrainerCallback
+    import time
+    
+    class MonitorCallback(TrainerCallback):
+        def __init__(self, tokenizer, prompts, model_name="model"):
+            self.tokenizer = tokenizer
+            self.prompts = prompts
+            
+            # 创建 logs 目录
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            
+            # 生成带时间戳的文件名: logs/20260119-173000_linzhi_monitor.log
+            timestamp = time.strftime('%Y%m%d-%H%M%S')
+            # 提取纯角色名，去除路径和前缀
+            clean_name = Path(model_name).name.replace("lora_", "")
+            self.log_file = log_dir / f"{timestamp}_{clean_name}_monitor.log"
+            
+            # 初始化日志文件
+            with open(self.log_file, "w", encoding="utf-8") as f:
+                f.write(f"=== 训练监控日志: {clean_name} ===\n")
+                f.write(f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            print(f"📝 监控日志将写入: {self.log_file}")
+            
+        def on_step_end(self, args, state, control, model=None, **kwargs):
+            # 每 30 步检查一次
+            if state.global_step % 30 == 0 and state.global_step > 0:
+                self._generate(model, state.global_step)
+
+        def on_epoch_end(self, args, state, control, model=None, **kwargs):
+            self._generate(model, f"Epoch {state.epoch}")
+
+        def _generate(self, model, step_info):
+            # 准备日志内容 (只保留关键信息，减少废话)
+            log_buffer = []
+            
+            header = f"\n🔍 [{step_info}]"
+            print(f"\n{header} ----------------")
+            
+            log_buffer.append(header)
+            
+            # 切换到评估模式
+            model.eval()
+            
+            for p in self.prompts:
+                try:
+                    # 构建消息
+                    messages = [{"role": "user", "content": p}]
+                    # 使用 chat template
+                    text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    
+                    # 编码
+                    inputs = self.tokenizer(text, return_tensors="pt").to(model.device)
+                    
+                    # 生成
+                    with torch.no_grad():
+                        outputs = model.generate(
+                            **inputs, 
+                            max_new_tokens=80,  # 减少 token 数以节省空间
+                            temperature=0.7,
+                            top_p=0.9,
+                            do_sample=True,
+                            pad_token_id=self.tokenizer.eos_token_id
+                        )
+                    
+                    # 解码
+                    response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
+                    # 压缩空白字符
+                    response = " ".join(response.split())
+                    
+                    # 打印控制台 (保持美观)
+                    print(f"🗣️  {p}")
+                    print(f"🤖 {response}")
+                    print("-" * 20)
+                    
+                    # 记录到日志 (紧凑格式: User | AI)
+                    log_buffer.append(f"Q: {p} | A: {response}")
+                    
+                except Exception as e:
+                    err_msg = f"⚠️ Error: {e}"
+                    print(err_msg)
+                    log_buffer.append(err_msg)
+            
+            # 写入文件
+            try:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write("\n".join(log_buffer) + "\n")
+            except Exception as e:
+                print(f"⚠️  写入日志文件失败: {e}")
+                
+            # 恢复训练模式
+            model.train()
+
+
+
+    # 根据数据集猜测适合的测试问题
+    import random
+    
+    base_prompts = [
+        "你好，你是谁？",
+        "你会做什么？",
+        "今天天气怎么样？",
+        "给我讲个笑话吧。",
+        "心情不好怎么办？",
+        "你喜欢什么颜色？",
+        "虽然不知道说什么，但是想找人聊聊。",
+        "你是机器人吗？",
+        "你住在哪里呀？",
+        "我好累啊，求安慰。",
+        "你觉得爱情是什么？",
+        "你会写代码吗？",
+        "我想去旅行，推荐个地方吧。",
+        "如果不开心，你会做什么？"
+    ]
+    
+    linzhi_prompts = [
+        "林栀，你在干什么？",
+        "林栀，我今天被老板骂了。",
+        "林栀，你喜欢我吗？",
+        "林栀，我想听你唱歌。",
+        "林栀，你是我的女朋友吗？",
+        "林栀，你会一直陪着我吗？",
+        "林栀，周末要不要一起去看电影？",
+        "林栀，你脸红了吗？"
+    ]
+    
+    catgirl_prompts = [
+        "主人回来了！",
+        "喵喵喵？",
+        "把手给我。",
+        "我要吃小鱼干！",
+        "过来，让我摸摸头。",
+        "你是哪里来的小猫咪？"
+    ]
+
+    monitor_prompts = []
+    # 基础问题随机选 2 个
+    monitor_prompts.extend(random.sample(base_prompts, 2))
+    
+    if "linzhi" in str(args.train_jsonl):
+        # 林栀专属问题随机选 2 个
+        monitor_prompts.extend(random.sample(linzhi_prompts, 2))
+    elif "catgirl" in str(args.train_jsonl):
+        # 猫娘专属问题随机选 2 个
+        monitor_prompts.extend(random.sample(catgirl_prompts, 2))
+    else:
+        # 其他情况再补 2 个基础问题
+        monitor_prompts.extend(random.sample(base_prompts, 2))
+
     # dataset
     train_path = str(Path(args.train_jsonl))
+
+
     val_path = str(Path(args.val_jsonl))
     data_files = {"train": train_path}
     if not args.no_eval and Path(val_path).exists():
@@ -177,6 +330,20 @@ def main() -> None:
             # 尝试使用chat template
             formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
 
+            # 🔍 Debug: 打印第一条格式化后的数据，让用户放心
+            if not hasattr(formatting_func, "has_printed"):
+                print("\n" + "="*40)
+                print("🔍 [数据格式检查] 实际喂给模型的数据内容 (ChatML格式):")
+                print("-" * 20)
+                print(formatted[:800])  # 打印前800字符
+                print("-" * 20)
+                if "<|im_start|>" in formatted:
+                    print("✅ 检测到 ChatML 标准标记 (<|im_start|>)，格式正确！")
+                else:
+                    print("⚠️  未检测到 ChatML 标记，请检查 Tokenizer 配置")
+                print("="*40 + "\n")
+                formatting_func.has_printed = True
+
             # 验证system消息是否被包含（简单检查）
             if has_system:
                 system_content = next(msg["content"] for msg in messages if msg.get("role") == "system")
@@ -185,18 +352,17 @@ def main() -> None:
 
             return formatted
         except Exception as e:
-            print(f"⚠️  Chat template处理失败，回退到简单格式: {e}")
-            # 回退：手动构建对话格式
+            print(f"⚠️  Chat template处理失败，回退到手动拼接 (Qwen ChatML): {e}")
+            # 回退：手动构建 ChatML 格式
             result = ""
             for msg in messages:
                 role = msg.get("role", "")
                 content = msg.get("content", "")
-                if role == "system":
-                    result += f"<|system|>\n{content}\n"
-                elif role == "user":
-                    result += f"<|user|>\n{content}\n"
-                elif role == "assistant":
-                    result += f"<|assistant|>\n{content}\n"
+                # Qwen ChatML 格式
+                result += f"<|im_start|>{role}\n{content}<|im_end|>\n"
+            
+            result += "<|endoftext|>"
+            return result
             return result
 
     # training args
@@ -260,7 +426,10 @@ def main() -> None:
         processing_class=tokenizer,
         formatting_func=formatting_func,
         peft_config=lora_cfg,
+        callbacks=[MonitorCallback(tokenizer, monitor_prompts, model_name=out_dir.name)],
     )
+
+
     try:
         trainer.model.print_trainable_parameters()
     except Exception:
