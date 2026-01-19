@@ -8,5 +8,5 @@ questionary>=2.0,<3
 torch>=2.2,<3
 transformers>=4.45,<5
 trl>=0.12,<1
-
+huggingface_hub>=0.26,<1
 
