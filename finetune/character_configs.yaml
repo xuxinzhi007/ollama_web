@@ -19,13 +19,19 @@ characters:
     # 训练参数 - 控制模型如何学习角色特征
     training_params:
       # 训练轮数：模型看完所有数据的次数
-      # 💡 调整建议：折中方案，既能学进知识，又不过度洗脑
-      epochs: 2.0
-      learning_rate: 5e-5
-      lora_r: 8
-      lora_alpha: 16
+      # 💡 调整建议：1.5B 模型极易过拟合，1个Epoch通常足够
+      epochs: 1.0
+      # 学习率：调低以防止"学傻"
+      learning_rate: 2e-5
+      # Rank：调低以减少对底座的干扰
+      lora_r: 4
+      lora_alpha: 8   # Alpha 保持为 Rank 的 2 倍
       lora_dropout: 0.05
       base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+
+      # 随机种子：确保训练结果可重现
+      # 💡 调整建议：固定值(如42)确保每次训练结果一致，不同值产生不同的随机性
+      seed: 42
 
   # 林栀 (聪明版) - 推荐尝试！
   # 使用 3B 模型，智商比 1.5B 高很多，但速度依然很快
