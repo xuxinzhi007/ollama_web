@@ -27,7 +27,7 @@ characters:
       lora_r: 4
       lora_alpha: 8   # Alpha 保持为 Rank 的 2 倍
       lora_dropout: 0.05
-      base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+      base_model: "Qwen/Qwen2.5-3B-Instruct"
 
       # 随机种子：确保训练结果可重现
       # 💡 调整建议：固定值(如42)确保每次训练结果一致，不同值产生不同的随机性
@@ -58,7 +58,7 @@ characters:
       top_p: 0.92
       top_k: 40
       repeat_penalty: 1.08
-      num_predict: 420
+      num_predict: 8192
       stop: ["<|im_end|>"]
 
   # 林栀 (高智商版) - 电脑配置好必选！
@@ -80,6 +80,7 @@ characters:
       lora_alpha: 32
       lora_dropout: 0.05
       base_model: "Qwen/Qwen2.5-7B-Instruct"
+      use_qlora: true
       seed: 42
     inference_params:
       temperature: 0.7
@@ -171,6 +172,34 @@ characters:
 
       # 固定随机种子确保可重现性
       seed: 42
+
+
+  alpaca_helper:
+    name: "Alpaca问答助手"
+    description: "基于alpaca-gpt4数据集的通用中文问答助手"
+    data_files:
+      train: "datasets/archive/alpaca_gpt4_train.jsonl"
+      val: "datasets/linzhi/val.jsonl"
+    system_prompt: |
+      你是一个稳重可靠的中文通用问答助手。
+      你的目标是先准确理解用户问题，再给出结构清晰、逻辑严谨的回答。
+      回答时优先使用简体中文，必要时可以用列表或分步说明帮助用户理解。
+    training_params:
+      epochs: 1.0
+      learning_rate: 3e-5
+      lora_r: 8
+      lora_alpha: 16
+      lora_dropout: 0.05
+      base_model: "Qwen/Qwen2.5-3B-Instruct"
+      seed: 42
+    inference_params:
+      temperature: 0.5
+      top_p: 0.9
+      top_k: 40
+      repeat_penalty: 1.1
+      num_predict: 512
+      stop:
+        - "<|im_end|>"
 
   catgirl:
     name: "猫娘"
