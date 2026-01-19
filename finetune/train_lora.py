@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List
@@ -48,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--merge_and_save", action="store_true", help="训练完成后合并 LoRA 到 base 并保存到 merged_dir")
     ap.add_argument("--no_eval", action="store_true")
     ap.add_argument("--gradient_checkpointing", action="store_true")
+    ap.add_argument("--use_qlora", action="store_true", help="使用QLoRA 4bit量化进行训练")
     ap.add_argument("--report_to", type=str, default="none", help="none|tensorboard|wandb 等")
     ap.add_argument("--resume_from_checkpoint", type=str, help="从指定检查点继续训练")
 
@@ -63,11 +66,24 @@ def main() -> None:
     _require("transformers")
     _require("peft")
     _require("trl")
+    if args.use_qlora:
+        try:
+            __import__("bitsandbytes")
+        except Exception:
+            print("⚠️ 检测到启用 QLoRA，但未找到 bitsandbytes，正在自动安装...")
+            result = subprocess.run([sys.executable, "-m", "pip", "install", "bitsandbytes"])
+            if result.returncode != 0:
+                raise RuntimeError("自动安装 bitsandbytes 失败，请手动执行: pip install bitsandbytes")
+        __import__("bitsandbytes")
 
     import torch
     from datasets import load_dataset
     from peft import LoraConfig
+    if args.use_qlora:
+        from peft import prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer
+    if args.use_qlora:
+        from transformers import BitsAndBytesConfig
 
     try:
         from trl import SFTTrainer
@@ -119,16 +135,32 @@ def main() -> None:
     # device_map 策略：cuda 用 auto；mps/cpu 直接本地加载后 .to(device)
     device_map = "auto" if plan.device == "cuda" else None
 
-    model_kwargs: Dict[str, Any] = {"device_map": device_map}
-    if plan.device != "cpu":
-        model_kwargs["dtype"] = torch_dtype
-
-    # 加载模型，简化提示
-    print("⏳ 加载模型权重（这可能需要几分钟）...")
-    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
+    if args.use_qlora:
+        if plan.device != "cuda":
+            raise RuntimeError("QLoRA 仅支持在 CUDA GPU 上训练，请在有 NVIDIA 显卡的环境中使用 --use_qlora")
+        compute_dtype = torch.bfloat16 if plan.dtype == "bf16" else torch.float16
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_use_double_quant=True,
+        )
+        print("⏳ 以 QLoRA 4bit 模式加载模型权重...")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_name_or_path,
+            device_map=device_map,
+            quantization_config=bnb_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        model_kwargs: Dict[str, Any] = {"device_map": device_map}
+        if plan.device != "cpu":
+            model_kwargs["dtype"] = torch_dtype
+        print("⏳ 加载模型权重（这可能需要几分钟）...")
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
     print("✅ 模型权重加载完成")
 
-    if plan.device in ("mps", "cpu"):
+    if plan.device in ("mps", "cpu") and not args.use_qlora:
         model.to(plan.device)
 
     if args.gradient_checkpointing:
@@ -212,6 +244,8 @@ def main() -> None:
 
     # TRL 0.15.x：通过 SFTConfig 传递 max_seq_length/packing 等参数
     use_mps_device = plan.device == "mps"
+    fp16_flag = (plan.dtype == "fp16") and not use_mps_device and not args.use_qlora
+    bf16_flag = (plan.dtype == "bf16") and not use_mps_device and not args.use_qlora
     sft_args = SFTConfig(
         output_dir=str(out_dir),
         num_train_epochs=args.num_train_epochs,
@@ -227,9 +261,8 @@ def main() -> None:
         save_total_limit=2,
         lr_scheduler_type="cosine",
         optim="adamw_torch",
-        # accelerate 对 MPS 的 mixed precision 支持在不同版本里差异较大；为稳定起见，MPS 强制关闭 fp16/bf16
-        fp16=(plan.dtype == "fp16") and not use_mps_device,
-        bf16=(plan.dtype == "bf16") and not use_mps_device,
+        fp16=fp16_flag,
+        bf16=bf16_flag,
         use_mps_device=use_mps_device,
         report_to=report_to,
         seed=args.seed,

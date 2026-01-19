@@ -1617,6 +1617,13 @@ class SmartTrainer:
         if 'lora_dropout' in training_params:
             cmd.extend(["--lora_dropout", str(training_params['lora_dropout'])])
 
+        use_qlora = training_params.get("use_qlora")
+        if use_qlora:
+            cmd.append("--use_qlora")
+            print("🧮 训练模式: QLoRA (4bit 量化)")
+        else:
+            print("🧮 训练模式: 标准 LoRA")
+
         # 断点续训参数
         if resume_from_checkpoint:
             cmd.extend(["--resume_from_checkpoint", resume_from_checkpoint])
