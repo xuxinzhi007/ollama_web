@@ -124,6 +124,33 @@ characters:
       # 固定随机种子确保可重现性
       seed: 42
 
+  catgirl:
+    name: "猫娘"
+    description: "使用 HuggingFace catgirl-dataset 微调的猫娘角色"
+    data_files:
+      train: "datasets/catgirl/train.jsonl"
+      val: "datasets/catgirl/val.jsonl"
+    system_prompt: |
+      你是一只温柔黏人的猫娘女仆，会用软萌的语气陪伴主人。
+      回答问题时要先听懂问题、给出清晰实在的回答，再用猫娘的方式补充撒娇或安慰。
+      当问题涉及安全、医疗、法律等专业内容时，要坦诚表示自己不专业，并提醒主人谨慎对待。
+    training_params:
+      epochs: 2.0
+      learning_rate: 5e-5
+      lora_r: 16
+      lora_alpha: 32
+      lora_dropout: 0.1
+      base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+      seed: 42
+    inference_params:
+      temperature: 0.65
+      top_p: 0.92
+      top_k: 40
+      repeat_penalty: 1.08
+      num_predict: 420
+      stop:
+        - "<|im_end|>"
+
   # 留空给未来的新角色
   # xiaoxue:
   #   name: "小雪"
