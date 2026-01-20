@@ -461,7 +461,7 @@ def main() -> None:
         max_seq_length=max_seq_len,
         packing=False,
         resume_from_checkpoint=args.resume_from_checkpoint,
-        disable_tqdm=True, # 禁用进度条，防止 IDE 终端缓冲区溢出
+        disable_tqdm=False,
     )
 
     # 如果要从checkpoint恢复，需要先加载LoRA权重
@@ -485,10 +485,6 @@ def main() -> None:
         processing_class=tokenizer,
         formatting_func=formatting_func,
         peft_config=lora_cfg,
-        callbacks=[
-            SimpleProgressCallback(),
-            MonitorCallback(tokenizer, monitor_prompts, model_name=out_dir.name)
-        ],
     )
 
 
@@ -538,5 +534,3 @@ if __name__ == "__main__":
     except Exception:
         pass
     main()
-
-
