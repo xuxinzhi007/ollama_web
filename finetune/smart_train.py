@@ -1617,6 +1617,13 @@ class SmartTrainer:
         if 'lora_dropout' in training_params:
             cmd.extend(["--lora_dropout", str(training_params['lora_dropout'])])
 
+        use_qlora = training_params.get("use_qlora")
+        if use_qlora:
+            cmd.append("--use_qlora")
+            print("🧮 训练模式: QLoRA (4bit 量化)")
+        else:
+            print("🧮 训练模式: 标准 LoRA")
+
         # 断点续训参数
         if resume_from_checkpoint:
             cmd.extend(["--resume_from_checkpoint", resume_from_checkpoint])
@@ -1988,6 +1995,18 @@ You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
         top_k = infer.get("top_k", 40)
         repeat_penalty = infer.get("repeat_penalty", 1.15)
         num_predict = infer.get("num_predict", 256)
+        num_ctx = infer.get("num_ctx")
+        if num_ctx is None:
+            try:
+                num_predict_int = int(num_predict)
+            except (TypeError, ValueError):
+                num_predict_int = 256
+            num_ctx = max(8192, num_predict_int * 2)
+        else:
+            try:
+                num_ctx = int(num_ctx)
+            except (TypeError, ValueError):
+                num_ctx = 8192
         stop_list = infer.get("stop", ["<|im_end|>"])
         if isinstance(stop_list, str):
             stop_list = [stop_list]
@@ -2029,6 +2048,7 @@ PARAMETER temperature {temperature}
 PARAMETER top_p {top_p}
 PARAMETER top_k {top_k}
 PARAMETER repeat_penalty {repeat_penalty}
+PARAMETER num_ctx {num_ctx}
 PARAMETER num_predict {num_predict}
 {stop_lines}
 
