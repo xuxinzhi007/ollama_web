@@ -154,6 +154,31 @@ def main() -> None:
     from transformers import TrainerCallback
     import time
     
+    class SimpleProgressCallback(TrainerCallback):
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            """
+            自定义进度打印，替代 tqdm 进度条。
+            仅在 logging_steps 触发时调用 (当前设置为 10)。
+            """
+            if state.is_local_process_zero and logs:
+                # 提取关键指标，使用 .get 防止某些 step 没有 loss
+                loss = logs.get("loss", None)
+                lr = logs.get("learning_rate", None)
+                epoch = logs.get("epoch", 0.0)
+                step = state.global_step
+                max_steps = state.max_steps
+                
+                # 构建输出字符串
+                log_parts = [f"🔄 [Step {step}/{max_steps}]"]
+                log_parts.append(f"Epoch: {epoch:.2f}")
+                
+                if loss is not None:
+                    log_parts.append(f"Loss: {loss:.4f}")
+                if lr is not None:
+                    log_parts.append(f"LR: {lr:.2e}")
+                    
+                print(" | ".join(log_parts))
+
     class MonitorCallback(TrainerCallback):
         def __init__(self, tokenizer, prompts, model_name="model"):
             self.tokenizer = tokenizer
@@ -403,6 +428,7 @@ def main() -> None:
         max_seq_length=max_seq_len,
         packing=False,
         resume_from_checkpoint=args.resume_from_checkpoint,
+        disable_tqdm=True, # 禁用进度条，防止 IDE 终端缓冲区溢出
     )
 
     # 如果要从checkpoint恢复，需要先加载LoRA权重
@@ -426,7 +452,10 @@ def main() -> None:
         processing_class=tokenizer,
         formatting_func=formatting_func,
         peft_config=lora_cfg,
-        callbacks=[MonitorCallback(tokenizer, monitor_prompts, model_name=out_dir.name)],
+        callbacks=[
+            SimpleProgressCallback(),
+            MonitorCallback(tokenizer, monitor_prompts, model_name=out_dir.name)
+        ],
     )
 
 
